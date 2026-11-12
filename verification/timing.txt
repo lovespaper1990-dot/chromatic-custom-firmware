@@ -1,0 +1,11 @@
+高云布局布线静态时序报告摘录
+器件 GW5A-EV25UG256CC1/I0，版本 A
+工具 V1.9.12.04-1
+分析路径 55346，分析端点 33365
+Setup 违例端点 0，Hold 违例端点 0
+Setup 最差余量 0.450 ns
+Hold 最差余量 0.187 ns
+Recovery 最差余量 0.884 ns
+Removal 最差余量 0.124 ns
+Pulse 最差余量 1.958 ns
+包内 evt1_x2.tr SHA256 da54dc37b193a34e7f3fd7b5fcab66afe67d70e9e53d388175885646fe1791c2

@@ -1,0 +1,6 @@
+.DS_Store
+.toolchain/
+*.lic
+*.key
+*.pem
+*.sav

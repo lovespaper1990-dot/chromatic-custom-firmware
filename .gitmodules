@@ -1,0 +1,6 @@
+[submodule "fpga"]
+	path = fpga
+	url = https://github.com/ModRetro/oss-chromatic-console-fpga.git
+[submodule "mcu"]
+	path = mcu
+	url = https://github.com/ModRetro/oss-chromatic-console-mcu.git

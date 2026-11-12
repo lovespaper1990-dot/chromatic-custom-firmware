@@ -1,0 +1,56 @@
+Snapshot persistence: round trip, interrupted write, damaged data/identity fallback and foreign save preservation passed.
+PASS USB audio packet storage: 1128 full, 518 short, 1670 underrun, 1637 overlapping reads
+fpga/tests/usb_audio_endpoint_tb.sv:88: $finish called at 1000000000 (1ps)
+PASS: shared snapshot RAM matches independent ports over 329193 cycles
+fpga/tests/snapshot_ram_tb.sv:100: $finish called at 3291926000 (1ps)
+PASS: ROM identity, all 6309 capture/read/upload/restore words, partial upload and wrong mapper
+fpga/tests/snapshot_tb.sv:165: $finish called at 7700295 (1s)
+PASS standby flush during a stalled QSPI read
+PASS stereo samples, burst framing, partial-read retry, underflow, OSD isolation and MISO release
+fpga/tests/headphone_audio_tb.sv:99: $finish called at 26362000 (1ps)
+PASS: UART/telemetry arbitration, CRC, length, control and opaque word byte order
+fpga/tests/snapshot_uart_tb.sv:92: $finish called at 21930 (1s)
+PASS 10 narrow asynchronous pulses, 3 real hotplug pulses, two full ROM CRC identities, synchronous BIST gating
+fpga/tests/snapshot_hotplug_tb.sv:76: $finish called at 62917651000 (1ps)
+snapshot_arbiter_tb.vhd:68:9:@725ns:(report note): PASS: six concurrent PSRAM clients, grants, data beats and completion routing
+simulation finished @725ns
+savestate_engine_tb.vhd:238:9:@1887391ns:(report note): PASS: 6309 words, 64 registers and five memory regions; delayed ACK, invalid header and abort recovery
+simulation finished @1887391ns
+PASS MENU short/long/chord, sleep at 150 ticks, held-key consumption, snapshot and cartridge arbitration, retained CPU enables, LCD/PCM/USB and switch reset
+fpga/tests/standby_tb.sv:109: $finish called at 37376000 (1ps)
+PASS speed=1: 220 standby/wake (147 requests during bus activity), 118931 half-pclk pin/state checks, 67320 retained checks; ungated cart diverged 72389 times
+PASS speed=0: 220 standby/wake (166 requests during bus activity), 126771 half-pclk pin/state checks, 67320 retained checks; ungated cart diverged 76857 times
+fpga/tests/cart_standby_tb.sv:92: $finish called at 254256700 (1ps)
+PASS: palette capture, UART atomicity, 16-row restore before first guest enable, partial abort and cold reset
+fpga/tests/snapshot_palette_tb.sv:209: $finish called at 2810301000 (1ps)
+PASS: external OAM/GDMA drained, internal OAM/GDMA retained, external H-Blank resumed
+fpga/tests/standby_dma_tb.sv:63: $finish called at 109924000 (1ps)
+analyze bus_savestates.vhd
+analyze T80_Pack.vhd
+analyze reg_savestates.vhd
+analyze GBse.vhd
+analyze T80.vhd
+analyze T80_MCode.vhd
+analyze T80_ALU.vhd
+analyze T80_Reg.vhd
+elaborate gbse
+analyze gbc_snd.vhd
+elaborate gbc_snd
+analyze speedcontrol.vhd
+elaborate speedcontrol
+analyze gb_savestates.vhd
+elaborate gb_savestates
+analyze gb_statemanager.vhd
+elaborate gb_statemanager
+analyze PSRAMController.vhd
+analyze MultiPortRamCtrl.vhd
+elaborate multiportramctrl
+analyze uart_rx.vhd
+elaborate uart_rx
+analyze uart_tx.vhd
+elaborate uart_tx
+elaborate standby_cpu_tb
+standby_cpu_tb.vhd:106:9:@465095ns:(report note): PASS real GBse counter/marker program through 64 standby/wake cycles at both speeds, 64 CPU state readback addresses per trial
+simulation finished @465095ns
+PASS: mixed-language black-box elaboration of the board, game core and snapshot connections
+PASS: project VHDL elaboration for CPU, audio, clocks, state engine, PSRAM and UART
