@@ -20,7 +20,7 @@ OSD_Result_t OSD_Common_Init(void)
             // The large style is reserved for numbers and hardware identifiers.
             if (lang && i != LARGE_WHITE) font = &osd_cjk;
             lv_style_init(style);
-            // Thin strokes in the small Chinese glyphs need a brighter inactive label.
+            // Keep inactive Chinese labels legible on the black menu background.
             uint32_t color = lang && i == GREY ? 0xAAAAAA : colors[i];
             lv_style_set_text_color(style, lv_color_hex(color));
             lv_style_set_text_font(style, font);

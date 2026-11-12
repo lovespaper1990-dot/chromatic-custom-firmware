@@ -11,8 +11,8 @@ OSD_Result_t SnapshotMenu_Draw(void *screen)
 {
     if (!label) {
         label = lv_label_create(screen);
-        lv_obj_set_width(label, 81);
-        lv_obj_align(label, LV_ALIGN_TOP_LEFT, 75, 44);
+        lv_obj_set_width(label, 68);
+        lv_obj_align(label, LV_ALIGN_TOP_LEFT, 77, 44);
         lv_obj_add_style(label, OSD_GetStyleTextWhite(), 0);
     }
     const char *help = OSD_Text("A: Save\nB: Load");

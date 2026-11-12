@@ -18,6 +18,7 @@
 #include "gfx.h"
 #include "board.h"
 #include "bt_audio.h"
+#include "headphone_volume.h"
 #include "freertos/semphr.h"
 #include <string.h>
 #include "brightness.h"
@@ -110,6 +111,7 @@ static int32_t read_headphone_audio(uint8_t *data, int32_t size)
         offset += chunk;
     }
     xSemaphoreGive(spi_gate);
+    HeadphoneVolume_Apply(data, length);
     return length;
 }
 
@@ -130,6 +132,7 @@ static void lvglTimerTask(void* param)
     while(1)
     {
         // The task running lv_timer_handler should have lower priority than that running `lv_tick_inc`
+        BT_Service();
         lv_timer_handler();
         vTaskDelay(pdMS_TO_TICKS(30));
     }
@@ -368,6 +371,7 @@ void app_main(void)
 
     Gfx_Start(scr);
 
+    BT_Restore();
     xTaskCreatePinnedToCore(lvglTimerTask, "lvgl Timer", kTimerTask_StackDepth, NULL, 4, NULL, 1);
 
     // Prompt to be printed before each line.

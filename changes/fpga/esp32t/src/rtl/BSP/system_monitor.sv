@@ -547,7 +547,8 @@ module system_monitor #(parameter STANDBY_HOLD_TICKS = 150) (
         ~menuDisabled | request_version,              // version info
         ~menuDisabled,                                // pmic sys status
         ~menuDisabled,                                // System Control
-        ~menuDisabled | updateBrightness,             // Audio + Brightness
+        ~menuDisabled | updateBrightness |
+            (system_control[15] && !standby && standby_tick), // Wheel update every 10 ms during Bluetooth playback
         ~menuDisabled | request_buttons,              // Buttons
         (~menuDisabled & transmitVolt & bat_is_LI),   // Lithium
         (~menuDisabled & transmitVolt & ~bat_is_LI)   // AA

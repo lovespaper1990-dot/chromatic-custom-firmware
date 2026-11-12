@@ -14,13 +14,10 @@ enum {
     kToggleBtnX_px = 77,
     kToggleBtnY_px = 55,
 
-    kMsgStateOnX_px = kToggleBtnX_px + 14,
-    kMsgStateOff_px = kToggleBtnX_px + 44,
-    kMsgStateY_px   = kToggleBtnY_px + 12,
+    kToggleHalfCenterOffset_px = 16,
 };
 
 typedef struct FrameBlend {
-    lv_obj_t* pMsgStateObj;
     lv_obj_t* pImgToggleOffObj;
     lv_obj_t* pImgToggleOnObj;
     FrameBlendState_t eCurrentState;
@@ -41,42 +38,26 @@ OSD_Result_t FrameBlend_Draw(void* arg)
 
     lv_obj_t *const pScreen = (lv_obj_t *const) arg;
 
-    if (_Ctx.pMsgStateObj == NULL)
+    const bool on = _Ctx.eCurrentState == kFrameBlendState_On;
+    lv_obj_t **image = on ? &_Ctx.pImgToggleOnObj : &_Ctx.pImgToggleOffObj;
+    if (*image == NULL)
     {
-        _Ctx.pMsgStateObj = lv_label_create(pScreen);
+        *image = lv_img_create(pScreen);
+        lv_img_set_src(*image, on ? &img_toggle_on : &img_toggle_off);
+        lv_obj_set_pos(*image, kToggleBtnX_px, kToggleBtnY_px);
 
-        lv_obj_add_style(_Ctx.pMsgStateObj, OSD_GetStyleTextBlack(), 0);
-        lv_obj_set_align(_Ctx.pMsgStateObj, LV_ALIGN_TOP_LEFT);
-    }
-
-    if (_Ctx.eCurrentState == kFrameBlendState_Off)
-    {
-        if (_Ctx.pImgToggleOffObj == NULL)
+        lv_obj_t *state = lv_label_create(*image);
+        lv_obj_add_style(state, OSD_GetStyleTextBlack(), 0);
+        lv_label_set_text_static(state, OSD_Text(on ? "ON" : "OFF"));
+        lv_obj_align(state, LV_ALIGN_CENTER, on ? -kToggleHalfCenterOffset_px : kToggleHalfCenterOffset_px, 0);
+        if (on)
         {
-            _Ctx.pImgToggleOffObj = lv_img_create(pScreen);
-            lv_obj_align(_Ctx.pImgToggleOffObj, LV_ALIGN_TOP_LEFT, kToggleBtnX_px, kToggleBtnY_px);
-            lv_img_set_src(_Ctx.pImgToggleOffObj, &img_toggle_off);
-
-            // In the Off state, the text should be displayed in the area where On normally is
-            lv_obj_set_pos(_Ctx.pMsgStateObj, kMsgStateOff_px, kMsgStateY_px);
-            lv_label_set_text_static(_Ctx.pMsgStateObj, OSD_Text("OFF"));
+            lv_obj_t *ratio = lv_label_create(*image);
+            lv_obj_add_style(ratio, OSD_GetStyleTextBlack(), 0);
+            lv_label_set_text_static(ratio, "1:1");
+            lv_obj_align(ratio, LV_ALIGN_CENTER, kToggleHalfCenterOffset_px, 0);
         }
     }
-    else
-    {
-        if (_Ctx.pImgToggleOnObj == NULL)
-        {
-            _Ctx.pImgToggleOnObj = lv_img_create(pScreen);
-            lv_obj_align(_Ctx.pImgToggleOnObj, LV_ALIGN_TOP_LEFT, kToggleBtnX_px, kToggleBtnY_px);
-            lv_img_set_src(_Ctx.pImgToggleOnObj, &img_toggle_on);
-
-            // In the On state, the text should be displayed in the area where Off normally is
-            lv_obj_set_pos(_Ctx.pMsgStateObj, kMsgStateOnX_px, kMsgStateY_px);
-            lv_label_set_text_static(_Ctx.pMsgStateObj, OSD_Text("ON                     1:1"));
-        }
-    }
-
-    lv_obj_move_foreground(_Ctx.pMsgStateObj);
 
     return kOSD_Result_Ok;
 }
@@ -166,7 +147,6 @@ OSD_Result_t FrameBlend_OnTransition(void* arg)
     (void)arg;
 
     lv_obj_t** ToDelete[] = {
-        &_Ctx.pMsgStateObj,
         &_Ctx.pImgToggleOffObj,
         &_Ctx.pImgToggleOnObj,
     };

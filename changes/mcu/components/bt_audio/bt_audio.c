@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/timers.h"
+#include "nvs.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -16,6 +17,20 @@ typedef struct {
     char name[40];
 } Peer;
 
+// Versioned NVS blob. Use fixed-size fields so a firmware update can read it.
+typedef struct {
+    Peer peer;
+    uint8_t reconnect;
+} HeadsetSettings;
+
+static HeadsetSettings saved;
+static bool save_pending;
+static bool retry_save;
+static TickType_t last_save;
+static bool boot_attempt;
+static TickType_t boot_start;
+static nvs_handle_t preferences;
+static const esp_bd_addr_t no_address = {0};
 static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 static Peer peers[10];
 static Peer selected;
@@ -30,6 +45,40 @@ static TimerHandle_t retry_timer;
 static StaticEventGroup_t event_storage;
 static EventGroupHandle_t events;
 enum { PROFILE_READY = BIT0, PROFILE_STOPPED = BIT1 };
+
+static bool has_saved_peer(void)
+{
+    return memcmp(saved.peer.address, no_address, sizeof(no_address)) != 0;
+}
+
+// Only the menu task commits settings; callbacks mark the latest copy dirty.
+static void flush_settings(void)
+{
+    if (!preferences || (retry_save && xTaskGetTickCount() - last_save < pdMS_TO_TICKS(5000))) return;
+    portENTER_CRITICAL(&lock);
+    bool write = save_pending;
+    HeadsetSettings value = saved;
+    save_pending = false;
+    portEXIT_CRITICAL(&lock);
+    if (!write) return;
+    esp_err_t e = nvs_set_blob(preferences, "last_peer_v1", &value, sizeof(value));
+    if (e == ESP_OK) e = nvs_commit(preferences);
+    retry_save = e != ESP_OK;
+    if (retry_save) {
+        last_save = xTaskGetTickCount();
+        portENTER_CRITICAL(&lock);
+        save_pending = true;
+        portEXIT_CRITICAL(&lock);
+        ESP_LOGE("Headphones", "Saving headset: %s", esp_err_to_name(e));
+    }
+}
+
+static void format_address(Peer *peer)
+{
+    const uint8_t *a = peer->address;
+    snprintf(peer->name, sizeof(peer->name), "%02X:%02X:%02X:%02X:%02X:%02X",
+             a[0], a[1], a[2], a[3], a[4], a[5]);
+}
 
 static void set_state(BTState value)
 {
@@ -82,9 +131,13 @@ void BT_GetSelection(unsigned index, BTSelection *view)
     portENTER_CRITICAL(&lock);
     view->state = state;
     view->count = count;
+    view->has_saved = has_saved_peer();
+    view->auto_reconnect = saved.reconnect != 0;
     view->name[0] = 0;
     if (state == BT_CONNECTING || state == BT_CONNECTED)
         memcpy(view->name, selected.name, sizeof(view->name));
+    else if (!index && view->has_saved)
+        memcpy(view->name, saved.peer.name, sizeof(view->name));
     else if (index && index <= count)
         memcpy(view->name, peers[index - 1].name, sizeof(view->name));
     portEXIT_CRITICAL(&lock);
@@ -118,8 +171,7 @@ static void discovery_result(esp_bt_gap_cb_param_t *p)
         memcpy(entry.name, name, n);
         entry.name[n] = 0;
     } else {
-        snprintf(entry.name, sizeof(entry.name), "%02X:%02X:%02X:%02X:%02X:%02X",
-                 entry.address[0], entry.address[1], entry.address[2], entry.address[3], entry.address[4], entry.address[5]);
+        format_address(&entry);
     }
     portENTER_CRITICAL(&lock);
     unsigned i = 0;
@@ -134,6 +186,22 @@ static void discovery_result(esp_bt_gap_cb_param_t *p)
 static void gap_event(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *p)
 {
     if (event == ESP_BT_GAP_DISC_RES_EVT) discovery_result(p);
+    if (event == ESP_BT_GAP_READ_REMOTE_NAME_EVT && p->read_rmt_name.stat == ESP_BT_STATUS_SUCCESS &&
+        p->read_rmt_name.rmt_name[0]) {
+        portENTER_CRITICAL(&lock);
+        bool matches = state == BT_CONNECTED &&
+                       !memcmp(selected.address, p->read_rmt_name.bda, sizeof(selected.address));
+        if (matches) {
+            snprintf(selected.name, sizeof(selected.name), "%.*s",
+                     (int)sizeof(selected.name) - 1, (const char *)p->read_rmt_name.rmt_name);
+        }
+        if (matches && !memcmp(saved.peer.address, selected.address, sizeof(selected.address)) &&
+            strcmp(saved.peer.name, selected.name)) {
+            saved.peer = selected;
+            save_pending = true;
+        }
+        portEXIT_CRITICAL(&lock);
+    }
     if (event == ESP_BT_GAP_DISC_STATE_CHANGED_EVT && p->disc_st_chg.state == ESP_BT_GAP_DISCOVERY_STOPPED) {
         portENTER_CRITICAL(&lock);
         if (state == BT_SCANNING) state = BT_IDLE;
@@ -164,9 +232,27 @@ static void audio_event(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *p)
     case ESP_A2D_CONNECTION_STATE_EVT:
         if (p->conn_stat.state == ESP_A2D_CONNECTION_STATE_CONNECTED) {
             portENTER_CRITICAL(&lock);
+            bool known = !memcmp(selected.address, p->conn_stat.remote_bda, sizeof(selected.address));
+            bool requested = state == BT_CONNECTING && known;
+            if (!known) {
+                selected = saved.peer;
+                if (memcmp(selected.address, p->conn_stat.remote_bda, sizeof(selected.address))) {
+                    memcpy(selected.address, p->conn_stat.remote_bda, sizeof(selected.address));
+                    selected.name[0] = 0;
+                }
+            }
+            HeadsetSettings current = {.peer = selected, .reconnect = 1};
+            if (requested && memcmp(&saved, &current, sizeof(saved))) {
+                saved = current;
+                save_pending = true;
+            }
             state = BT_CONNECTED;
             media_requested = true;
             portEXIT_CRITICAL(&lock);
+            Peer numeric = current.peer;
+            format_address(&numeric);
+            if (!current.peer.name[0] || !strcmp(numeric.name, current.peer.name))
+                esp_bt_gap_read_remote_name(current.peer.address);
             xTimerStart(retry_timer, 0);
             esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_CHECK_SRC_RDY);
         } else if (p->conn_stat.state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
@@ -193,14 +279,13 @@ static void audio_event(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *p)
     }
 }
 
-// Called on the menu task; all Bluedroid callbacks only update state.
-void BT_PowerOff(void)
+static bool stop_radio(void)
 {
     if (xEventGroupGetBits(events) & PROFILE_READY) {
         if (esp_a2d_source_deinit() != ESP_OK ||
             !(xEventGroupWaitBits(events, PROFILE_STOPPED, pdTRUE, pdFALSE, pdMS_TO_TICKS(2000)) & PROFILE_STOPPED)) {
             set_state(BT_FAILED);
-            return;
+            return false;
         }
         xEventGroupClearBits(events, PROFILE_READY);
     }
@@ -209,7 +294,7 @@ void BT_PowerOff(void)
         (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED && esp_bt_controller_disable() != ESP_OK) ||
         (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_INITED && esp_bt_controller_deinit() != ESP_OK)) {
         set_state(BT_FAILED);
-        return;
+        return false;
     }
     xTimerStop(retry_timer, 0);
     set_streaming(false);
@@ -217,6 +302,20 @@ void BT_PowerOff(void)
     count = 0;
     state = BT_IDLE;
     portEXIT_CRITICAL(&lock);
+    return true;
+}
+
+void BT_PowerOff(void)
+{
+    boot_attempt = false;
+    if (!stop_radio()) return;
+    portENTER_CRITICAL(&lock);
+    if (saved.reconnect) {
+        saved.reconnect = 0;
+        save_pending = true;
+    }
+    portEXIT_CRITICAL(&lock);
+    flush_settings();
 }
 
 static esp_err_t start_radio(void)
@@ -238,13 +337,65 @@ static esp_err_t start_radio(void)
                                              pdMS_TO_TICKS(2000)) & PROFILE_READY)) e = ESP_ERR_TIMEOUT;
     if (e != ESP_OK) {
         ESP_LOGE("Headphones", "Bluetooth initialization: %s", esp_err_to_name(e));
-        BT_PowerOff();
+        stop_radio();
     }
     return e;
 }
 
+void BT_Restore(void)
+{
+    if (nvs_open("headphones", NVS_READWRITE, &preferences) != ESP_OK) {
+        ESP_LOGE("Headphones", "Headset preferences unavailable");
+        return;
+    }
+    HeadsetSettings value = {0};
+    size_t size = sizeof(value);
+    esp_err_t e = nvs_get_blob(preferences, "last_peer_v1", &value, &size);
+    if (e == ESP_ERR_NVS_NOT_FOUND) {
+        // dev2 stored the Classic Bluetooth bond, but not the selected address.
+        if (start_radio() != ESP_OK) return;
+        int bonds = esp_bt_gap_get_bond_device_num();
+        if (bonds == 1) {
+            if (esp_bt_gap_get_bond_device_list(&bonds, &value.peer.address) != ESP_OK || bonds != 1) {
+                stop_radio();
+                return;
+            }
+            format_address(&value.peer);
+            value.reconnect = 1;
+        }
+        saved = value;
+        save_pending = true;
+        flush_settings();
+        if (!value.reconnect) stop_radio();
+    } else if (e == ESP_OK && size == sizeof(value)) {
+        value.peer.name[sizeof(value.peer.name) - 1] = 0;
+        saved = value;
+    } else {
+        ESP_LOGW("Headphones", "Unreadable headset preferences");
+        return;
+    }
+    if (value.reconnect && has_saved_peer()) {
+        BT_Connect(0);
+        boot_start = xTaskGetTickCount();
+        boot_attempt = true;
+    }
+}
+
+void BT_Service(void)
+{
+    flush_settings();
+    if (!boot_attempt) return;
+    portENTER_CRITICAL(&lock);
+    BTState current = state;
+    portEXIT_CRITICAL(&lock);
+    if (current == BT_CONNECTING && xTaskGetTickCount() - boot_start < pdMS_TO_TICKS(30000)) return;
+    boot_attempt = false;
+    if (current != BT_CONNECTED && stop_radio()) set_state(BT_FAILED);
+}
+
 void BT_Scan(void)
 {
+    boot_attempt = false;
     portENTER_CRITICAL(&lock);
     count = 0;
     state = BT_SCANNING;
@@ -256,11 +407,13 @@ void BT_Scan(void)
 
 void BT_Connect(unsigned index)
 {
+    boot_attempt = false;
     portENTER_CRITICAL(&lock);
-    bool valid = index > 0 && index <= count;
-    if (valid) { selected = peers[index - 1]; state = BT_CONNECTING; }
+    bool valid = index ? index <= count : has_saved_peer();
+    if (valid) { selected = index ? peers[index - 1] : saved.peer; state = BT_CONNECTING; }
     portEXIT_CRITICAL(&lock);
-    if (valid && esp_a2d_source_connect(selected.address) != ESP_OK) set_state(BT_FAILED);
+    if (valid && (start_radio() != ESP_OK || esp_a2d_source_connect(selected.address) != ESP_OK))
+        set_state(BT_FAILED);
 }
 
 void BT_Disconnect(void)

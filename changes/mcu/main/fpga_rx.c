@@ -15,6 +15,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "fw.h"
+#include "headphone_volume.h"
 #include "gbc_color_temp.h"
 #include "osd.h"
 #include "pwrmgr.h"
@@ -357,14 +358,8 @@ static void ProcessMessage(const RxMsg_t *const pMsg)
             break;
         case kRxCmd_AudioBrightness:
         {
-            uint8_t temp = 127-(rxdata & 0x7F);
-            temp = (uint8_t)(((float)temp)*1.08695652173913f);
-            const float volume = temp > 100 ? 100 : temp;
-            const uint8_t headphone = (rxdata >> 7) & 0x1;
+            HeadphoneVolume_SetWheel(rxdata & 0x7F);
             const uint8_t lcd_brightness = rxdata >> 8;
-
-            (void)volume;
-            (void)headphone;
 
             // Ignore this when the OSD is active since the MCU always has the latest brightness value
             if (OSD_IsVisible() == false)

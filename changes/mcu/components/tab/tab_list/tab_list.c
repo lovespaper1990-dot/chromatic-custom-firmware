@@ -108,8 +108,7 @@ OSD_Result_t TabList_Draw(void* arg)
 
             // Remove all styles so that the selected item is set appropriately
             lv_obj_remove_style_all(pItem->DataObj);
-            lv_obj_align(pItem->DataObj, LV_ALIGN_TOP_LEFT, TextOrigin.x,
-                         TextOrigin.y - (OSD_IsChinese() ? 1 : 0));
+            lv_obj_align(pItem->DataObj, LV_ALIGN_TOP_LEFT, TextOrigin.x, TextOrigin.y);
             lv_label_set_text_static(pItem->DataObj, OSD_Text(pItem->Widget.Name));
             lv_obj_move_foreground(pItem->DataObj);
 

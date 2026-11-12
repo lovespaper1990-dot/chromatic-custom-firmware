@@ -15,12 +15,16 @@ typedef struct {
     BTState state;
     unsigned count;
     bool powered;
+    bool has_saved;
+    bool auto_reconnect;
     char name[40];        // selected headset, or connected peer
 } BTSelection;
 
 typedef int32_t (*BTReadPCM)(uint8_t *data, int32_t length);
 
 void BT_AttachAudio(BTReadPCM read_pcm, void (*route_changed)(void));
+void BT_Restore(void);
+void BT_Service(void);
 bool BT_IsStreaming(void);
 void BT_GetSelection(unsigned index, BTSelection *selection);
 void BT_Scan(void);
