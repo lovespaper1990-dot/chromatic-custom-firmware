@@ -62,6 +62,12 @@ module standby_tb;
         board.debouncer_MENU.filtered=0; board.debouncer_A.filtered=0;
         clocks(8); core_reset=0; lock=1; clocks(32);
         check_outputs(0);
+        if (board.u_aud_system_top.mute !== 1'b1 || board.u_aud_system_top.u_pol_master.mute !== 1'b0)
+            $fatal(1,"Bluetooth must silence analog PCM while keeping the wheel ADC powered");
+        force board.system_control=16'h0001; clocks(1);
+        if (board.u_aud_system_top.u_pol_master.mute !== 1'b1)
+            $fatal(1,"analog silent mode lost codec power-down");
+        force board.system_control=16'h8000; clocks(1);
         press_menu(); release_menu();
         if(board.menuDisabled !== 0) $fatal(1,"short menu did not open");
         press_menu(); timer_ticks(160);

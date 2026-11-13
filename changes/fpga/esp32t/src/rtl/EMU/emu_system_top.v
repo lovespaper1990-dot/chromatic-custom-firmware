@@ -3,7 +3,7 @@
 module emu_system_top
 (
     input snapshot_power_reset, input snap_supported, input [63:0] snap_identity,
-    output snap_request, output [12:0] snap_index, output snap_read,
+    output snap_request, output [13:0] snap_index, output snap_read,
     output [63:0] snap_out, input [63:0] snap_in, input snap_ack,
     input snap_cmd_toggle, input [6:0] snap_cmd, input [79:0] snap_cmd_data,
     output snap_reply_toggle, output [79:0] snap_reply,

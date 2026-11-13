@@ -2,7 +2,7 @@
 // R/W and data until the acknowledge toggle crosses back from xClk.
 module snapshot_psram (
     input xclk, input reset, input initialized,
-    input request_toggle, input [12:0] index, input read_word,
+    input request_toggle, input [13:0] index, input read_word,
     input [63:0] write_data, output reg [63:0] read_data = 0,
     output reg ack_toggle = 0,
     output reg ram_req = 0, output reg ram_read = 0, output reg [22:0] ram_addr,

@@ -41,6 +41,7 @@ with tempfile.TemporaryDirectory() as temp:
             print(module.group(), file=extracted)
     for name, sources in [
         ("usb_audio_endpoint_tb", [usb_audio]),
+        ("snapshot_mbc5_bus_tb", [rtl / "EMU/snapshot_mbc5_bus.v", rtl / "EMU/snapshot_mbc5_mapper.v"]),
         ("snapshot_ram_tb", [rtl / "EMU/CORE/dpramV.v"]),
         ("snapshot_tb", [rtl / "EMU/snapshot_cart.v", rtl / "EMU/snapshot_control.v",
                         rtl / "BSP/snapshot_psram.v"]),
@@ -49,8 +50,11 @@ with tempfile.TemporaryDirectory() as temp:
                              ("system_monitor.sv", "system_monitor_arbiter.sv",
                               "uart_packet_wrapper_rx.sv", "uart_packet_wrapper_tx.sv")]),
     ]:
-        run(ivl + ["-s", name, "-o", "model", tests / (name + ".sv"), *sources], temp, True)
-        run(vvp + ["model"], temp)
+        variants = (0, 2, 3) if name == "snapshot_tb" else (0,)
+        for ram_code in variants:
+            params = [f"-Psnapshot_tb.RAM_CODE={ram_code}"] if ram_code else []
+            run(ivl + params + ["-s", name, "-o", "model", tests / (name + ".sv"), *sources], temp, True)
+            run(vvp + ["model"], temp)
 
     # Exercise the board's real cartridge debounce, reset and scanner across
     # both clocks. Unrelated PLL, memory and USB blocks are left unelaborated.
@@ -68,7 +72,8 @@ with tempfile.TemporaryDirectory() as temp:
         run([ghdl, "-a", "--std=08", source.name], temp)
     for design in ("snapshot_arbiter_tb", "savestate_engine_tb"):
         run([ghdl, "-e", "--std=08", design], temp)
-        run([ghdl, "-r", "--std=08", design, "--assert-level=error"], temp)
+        for args in ([[], ["-gram_code=2"], ["-gram_code=3"]] if design == "savestate_engine_tb" else [[]]):
+            run([ghdl, "-r", "--std=08", design, *args, "--assert-level=error"], temp)
 
     # Drive the Verilog video unit with the project's VHDL load sequencer and
     # clock-enable generator. Keep translated modules inside the test directory.
@@ -88,7 +93,8 @@ with tempfile.TemporaryDirectory() as temp:
                project / "src/top.v", usb_stub, Path(temp) / "speedcontrol.v",
                rtl / "EMU/emu_system_top.v", rtl / "EMU/cart.v",
                rtl / "BSP/system_monitor.sv", rtl / "BSP/button_debounce.v",
-               rtl / "BSP/mem_system_top.sv"], temp, True)
+               rtl / "BSP/mem_system_top.sv", rtl / "BSP/aud_system_top_8_16.sv",
+               rtl / "BSP/polling_master_8_16.v"], temp, True)
     run(vvp + ["standby"], temp)
     run(ivl + ["-s", "cart_standby_tb", "-o", "cart_standby",
                tests / "cart_standby_tb.sv", rtl / "EMU/cart.v", Path(temp) / "speedcontrol.v"], temp, True)

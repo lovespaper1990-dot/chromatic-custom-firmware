@@ -2,13 +2,14 @@
 `timescale 1ns/1ps
 module headphone_audio_tb;
     reg enabled = 0;
+    reg [6:0] wheel = 7'h7f;
     reg sclk = 0, cs = 0, mosi = 0, mclk = 0;
     wire miso, osd_valid, osd_init;
     integer partial_bits;
     reg [15:0] left = 16'h1234, right = 16'hbaad;
     QSPI_Slave dut(.QSPI_CLK(sclk), .QSPI_CS(cs), .QSPI_MOSI(mosi),
         .QSPI_MISO(miso), .QSPI_HD(1'b0), .QSPI_WP(1'b0),
-        .AUDIO_ENABLE(enabled), .LEFT(left), .RIGHT(right), .AUD_MCLK(mclk),
+        .AUDIO_ENABLE(enabled), .WHEEL(wheel), .LEFT(left), .RIGHT(right), .AUD_MCLK(mclk),
         .qMenuInit(osd_init), .qDataValid(osd_valid));
 
     task clocks(input integer n);
@@ -39,6 +40,18 @@ module headphone_audio_tb;
         clocks(7);
     endtask
 
+    task read_wheel(input [6:0] position);
+        integer i;
+        reg [10:0] cmd;
+        wheel = position;
+        cmd = 11'h016;
+        cs = 0;
+        for (i = 10; i >= 0; i--) write_bit(cmd[i]);
+        clocks(7);
+        read_frame({8'h57,1'b0,position,1'b1,~position,8'ha6});
+        end_audio();
+    endtask
+
     task end_audio;
         cs = 1;
         #2;
@@ -59,6 +72,7 @@ module headphone_audio_tb;
         read_frame(0); // underflow
         end_audio();
         capture();
+        read_wheel(7'h7f); read_wheel(7'h00); read_wheel(7'h3b);
         left = 16'h5678; right = 16'hcafe; capture();
         start_audio();
         read_frame(32'h3412adba);

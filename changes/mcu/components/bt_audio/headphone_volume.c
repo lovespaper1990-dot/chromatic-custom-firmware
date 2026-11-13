@@ -5,19 +5,40 @@
 // The board reads seven bits from codec register 117. Both analog outputs
 // mute above 0x76; smaller values turn the wheel up. Start muted until read.
 enum { WheelMute = 0x77, UnityGain = 32768 };
-static _Atomic uint32_t gain_q15;
+static _Atomic uint32_t uart_gain;
+static _Atomic int direct_gain = -1;
+static _Atomic int wheel = -1;
+static _Atomic int stream_wheel = -1;
 
-void HeadphoneVolume_SetWheel(uint8_t position)
+int HeadphoneVolume_GetWheel(void)
+{
+    int direct = atomic_load_explicit(&stream_wheel, memory_order_relaxed);
+    return direct >= 0 ? direct : atomic_load_explicit(&wheel, memory_order_relaxed);
+}
+
+static uint32_t wheel_gain(uint8_t position)
 {
     uint32_t level = position < WheelMute ? WheelMute - position : 0;
     // Taper the amplitude so the quiet end can be adjusted in small steps.
-    uint32_t gain = level * level * UnityGain / (WheelMute * WheelMute);
-    atomic_store_explicit(&gain_q15, gain, memory_order_relaxed);
+    return level * level * UnityGain / (WheelMute * WheelMute);
+}
+
+void HeadphoneVolume_SetWheel(uint8_t position)
+{
+    atomic_store_explicit(&wheel, position, memory_order_relaxed);
+    atomic_store_explicit(&uart_gain, wheel_gain(position), memory_order_relaxed);
+}
+
+void HeadphoneVolume_SetStreamWheel(uint8_t position)
+{
+    atomic_store_explicit(&stream_wheel, position, memory_order_relaxed);
+    atomic_store_explicit(&direct_gain, wheel_gain(position), memory_order_relaxed);
 }
 
 void HeadphoneVolume_Apply(uint8_t *pcm, size_t length)
 {
-    uint32_t gain = atomic_load_explicit(&gain_q15, memory_order_relaxed);
+    int direct = atomic_load_explicit(&direct_gain, memory_order_relaxed);
+    uint32_t gain = direct >= 0 ? (uint32_t)direct : atomic_load_explicit(&uart_gain, memory_order_relaxed);
     if (gain == UnityGain) return;
     if (gain == 0) {
         memset(pcm, 0, length);

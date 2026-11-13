@@ -30,6 +30,15 @@ int main(void)
             for (size_t i = 0; i < sizeof(out) / sizeof(out[0]); ++i) assert(out[i] == 0);
         previous_peak = out[1];
     }
+    HeadphoneVolume_SetStreamWheel(0);
+    HeadphoneVolume_SetWheel(127);
+    assert(HeadphoneVolume_GetWheel() == 0);
+    memcpy(pcm + 1, source, sizeof(source));
+    HeadphoneVolume_Apply(pcm + 1, sizeof(source));
+    assert(!memcmp(pcm + 1, source, sizeof(source)));
+    HeadphoneVolume_SetStreamWheel(127);
+    HeadphoneVolume_Apply(pcm + 1, sizeof(source));
+    for (size_t i = 1; i <= sizeof(source); ++i) assert(pcm[i] == 0);
     puts("PASS Bluetooth PCM wheel range, stereo polarity, startup mute, full scale and unaligned buffers");
     return 0;
 }

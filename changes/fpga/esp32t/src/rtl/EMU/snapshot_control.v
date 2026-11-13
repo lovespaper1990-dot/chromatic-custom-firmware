@@ -7,12 +7,14 @@ module snapshot_control #(parameter STALL_BITS = 22) (
     output reg capture = 0, output reg restore = 0,
     input core_busy, input core_req, input core_read, input [25:0] core_addr,
     input [63:0] core_out, output reg core_done = 0,
-    output reg mem_toggle = 0, output reg [12:0] mem_index,
+    output reg mem_toggle = 0, output reg [13:0] mem_index,
     output reg mem_read, output reg [63:0] mem_out,
     input mem_ack, input [63:0] mem_in, input core_loaded,
     output reg core_abort = 0, output reg restart_core = 0, output active
 );
-    localparam WORDS = 6309;
+    // The cartridge probe gates supported mapper geometries before this mailbox.
+    wire [13:0] words = identity[47:40] == 3 ? 14'd10341 :
+                        identity[47:40] == 2 ? 14'd7269 : 14'd6309;
     localparam IDLE=0, SAVING=1, LOADING=2;
     localparam NONE=0, CORE=1, READ=2, WRITE=3, DRAIN=4;
     reg [1:0] operation = IDLE;
@@ -26,7 +28,7 @@ module snapshot_control #(parameter STALL_BITS = 22) (
     wire work_pending = operation != IDLE || owner == READ || owner == WRITE;
     wire failed = work_pending && (!supported || (&stall_count));
     assign active = operation != IDLE;
-    reg [12:0] next_word = 0;
+    reg [13:0] next_word = 0;
     wire [15:0] index = cmd == 7'h22 ? cmd_data[79:64] : cmd_data[15:0];
 
     task respond_status(input [7:0] op, input [7:0] result);
@@ -101,14 +103,14 @@ module snapshot_control #(parameter STALL_BITS = 22) (
                             mem_out[63:32] == 32'hb0ca) header_committed <= 1;
                     end
                     READ: begin
-                        reply <= {3'b000, mem_index, mem_in};
+                        reply <= {2'b00, mem_index, mem_in};
                         reply_toggle <= ~reply_toggle;
                     end
                     WRITE: begin
                         next_word <= mem_index + 1'b1;
-                        staged <= mem_index == WORDS - 1 && supported;
+                        staged <= mem_index == words - 1 && supported;
                         // The request index and payload remain held until this ACK.
-                        reply <= {3'b000, mem_index, mem_out};
+                        reply <= {2'b00, mem_index, mem_out};
                         reply_toggle <= ~reply_toggle;
                     end
                 endcase
@@ -117,7 +119,7 @@ module snapshot_control #(parameter STALL_BITS = 22) (
             if (core_req && owner == NONE && operation != IDLE) begin
                 owner <= CORE;
                 // Slot zero is 64K-DWORD aligned; the core addresses DWORDs.
-                mem_index <= core_addr[13:1];
+                mem_index <= core_addr[14:1];
                 mem_read <= core_read;
                 mem_out <= core_out;
                 mem_toggle <= ~mem_toggle;
@@ -161,7 +163,7 @@ module snapshot_control #(parameter STALL_BITS = 22) (
                     respond_status({1'b0,cmd}, 5);
                 else if (!supported)
                     respond_status({1'b0,cmd}, 2);
-                else if (index >= WORDS)
+                else if (index >= words)
                     respond_status({1'b0,cmd}, 3);
                 else if (cmd == 7'h21 && !staged)
                     respond_status(8'h21, 4);
@@ -171,7 +173,7 @@ module snapshot_control #(parameter STALL_BITS = 22) (
                 else if (cmd == 7'h21 || cmd == 7'h22) begin
                     owner <= cmd == 7'h21 ? READ : WRITE;
                     if (cmd == 7'h22) staged <= 0;
-                    mem_index <= index[12:0];
+                    mem_index <= index[13:0];
                     mem_read <= cmd == 7'h21;
                     mem_out <= cmd_data[63:0];
                     mem_toggle <= ~mem_toggle;

@@ -10,6 +10,7 @@ use std.env.all;
 use work.pBus_savestates.all;
 
 entity savestate_engine_tb is
+    generic (ram_code : natural range 0 to 3 := 0);
 end;
 
 architecture test of savestate_engine_tb is
@@ -18,9 +19,10 @@ architecture test of savestate_engine_tb is
     type sizes_t is array(natural range <>) of natural;
     type bytes_t is array(natural range <>) of byte_t;
     type words_t is array(natural range <>) of word_t;
-    constant bank_sizes : sizes_t(0 to 4) := (32768, 16384, 160, 128, 512);
+    constant cart_bytes : sizes_t(0 to 3) := (512, 2048, 8192, 32768);
+    constant bank_sizes : sizes_t(0 to 4) := (32768, 16384, 160, 128, cart_bytes(ram_code));
     constant slot_base : natural := 16#3800000#;
-    constant word_count : natural := 6309; -- header, 64 registers, then 49952 bytes
+    constant word_count : natural := 6245 + cart_bytes(ram_code)/8;
 
     signal clk : std_logic := '0';
     signal abort_state, reset_in, save, load, vsync, ce, corrupt, bad_header : std_logic := '0';
@@ -50,7 +52,7 @@ architecture test of savestate_engine_tb is
     begin
         -- The ROM-only port ties cartridge RAM reads low, including its
         -- 512-byte MBC2 placeholder in the upstream file format.
-        if bank = 4 then return x"00"; end if;
+        if bank = 4 and ram_code = 0 then return x"00"; end if;
         return std_logic_vector(to_unsigned(
             (address * 53 + (address / 256) * 11 + bank * 29 + 5) mod 256, 8));
     end;
@@ -80,7 +82,7 @@ begin
     dut: entity work.gb_savestates port map (
         clk => clk, reset_in => reset_in, abort_state => abort_state, reset_out => reset_out, load_done => load_done,
         increaseSSHeaderCount => '0', save => save, load => load,
-        savestate_address => slot_base, savestate_busy => busy, cart_ram_size => x"00",
+        savestate_address => slot_base, savestate_busy => busy, cart_ram_size => std_logic_vector(to_unsigned(ram_code, 8)),
         lcd_vsync => vsync, BUS_Din => reg_input, BUS_Adr => reg_addr,
         BUS_wren => reg_write, BUS_rst => reg_reset, BUS_Dout => reg_output,
         loading_savestate => loading, saving_savestate => saving,
@@ -88,7 +90,7 @@ begin
         Save_RAMAddr => ram_addr, Save_RAMWrEn => ram_enable, Save_RAMWriteData => ram_write,
         Save_RAMReadData_WRAM => ram_read(0), Save_RAMReadData_VRAM => ram_read(1),
         Save_RAMReadData_ORAM => ram_read(2), Save_RAMReadData_ZRAM => ram_read(3),
-        Save_RAMReadData_CRAM => x"00", bus_out_Din => store_input, bus_out_Dout => store_output,
+        Save_RAMReadData_CRAM => ram_read(4), bus_out_Din => store_input, bus_out_Dout => store_output,
         bus_out_Adr => store_addr, bus_out_rnw => store_read, bus_out_ena => store_request,
         bus_out_be => enables, bus_out_done => store_done);
 
@@ -235,13 +237,13 @@ begin
         assert busy = '1' and asleep = '1' severity failure;
         abort_state <= '1'; tick; abort_state <= '0'; tick;
         assert busy = '0' and asleep = '0' and ram_enable = "00000" and load_done = '0' severity failure;
-        report "PASS: 6309 words, 64 registers and five memory regions; delayed ACK, invalid header and abort recovery";
+        report "PASS: " & integer'image(word_count) & " words, 64 registers and five memory regions; delayed ACK, invalid header and abort recovery";
         finish;
     end process;
 
     watchdog: process
     begin
-        wait for 5 ms;
+        wait for 10 ms;
         assert false report "State engine timed out" severity failure;
     end process;
 end;

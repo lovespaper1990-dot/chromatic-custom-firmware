@@ -54,7 +54,8 @@ int main(void) {
     /* A valid file for a different ID can share the same filename hash. */
     uint8_t other_id[8];
     memcpy(other_id, id, sizeof other_id);
-    other_id[3]++;
+    other_id[0] = 0x1b; other_id[1] = 3; other_id[2] = 3;
+    assert(snap_word_count(other_id) == 10341);
     char other_directory[] = "/tmp/chromatic-slot-XXXXXX";
     assert(mkdtemp(other_directory));
     pattern = 49;
@@ -66,12 +67,21 @@ int main(void) {
     assert(snap_slot(dir, id, true, restore) == SNAP_OK && restored == SNAP_WORDS);
     assert(snap_slot(dir, id, false, capture) == SNAP_WRONG);
     pattern = 49; restored = 0;
-    assert(snap_slot(dir, other_id, true, restore) == SNAP_OK && restored == SNAP_WORDS);
+    assert(snap_slot(dir, other_id, true, restore) == SNAP_OK && restored == 10341);
     assert(unlink(second) == 0);
     id[3]++;
     assert(snap_slot(dir, id, true, restore) == SNAP_WRONG);
     id[3]--; id[7]++;
     assert(snap_slot(dir, id, true, restore) == SNAP_EMPTY);
+    assert(!unlink(first));
+    id[0] = 0x1a; id[1] = 5; id[2] = 2;
+    assert(snap_word_count(id) == 7269);
+    assert(snap_slot(dir, id, false, capture) == SNAP_OK);
+    restored = 0;
+    assert(snap_slot(dir, id, true, restore) == SNAP_OK && restored == 7269);
+    id[0] = 0x10;
+    assert(snap_slot(dir, id, false, capture) == SNAP_UNSUPPORTED);
+    snprintf(first, sizeof first, "%s/01020305.S0", dir);
     assert(!unlink(first) && !rmdir(dir));
     puts("Snapshot persistence: round trip, interrupted write, damaged data/identity fallback and foreign save preservation passed.");
 }

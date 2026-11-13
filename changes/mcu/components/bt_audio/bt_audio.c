@@ -264,10 +264,13 @@ static void audio_event(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *p)
     case ESP_A2D_AUDIO_STATE_EVT: {
         bool active = p->audio_stat.state == ESP_A2D_AUDIO_STATE_STARTED;
         portENTER_CRITICAL(&lock);
-        media_requested = false; // Respect a subsequent suspend from the headset.
+        // Some sinks report STOPPED before the first START acknowledgement.
+        // Keep retrying startup, but respect a suspend after real playback.
+        bool stop_retry = active || streaming;
+        if (stop_retry) media_requested = false;
         portEXIT_CRITICAL(&lock);
         set_streaming(active);
-        xTimerStop(retry_timer, 0);
+        if (stop_retry) xTimerStop(retry_timer, 0);
         break;
     }
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:

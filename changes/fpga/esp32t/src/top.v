@@ -436,6 +436,8 @@ module top #(
         .AUD_WCLK(AUD_WCLK),
 
         .software_mute(system_control[0] | system_control[15]),
+        // Bluetooth needs the codec volume-pin ADC while analog PCM is silent.
+        .codec_power_down(system_control[0] && !system_control[15]),
         .pmic_sys_status(pmic_sys_status),
         .volume(volume),
         .temperature(temperature),
@@ -463,7 +465,7 @@ module top #(
             memrst <= CART_DET_sr[17:2] == 16'h7FFF || CART_DET_sr[17:2] == 16'h8000;
 
     wire snap_request, snap_read, snap_ack;
-    wire [12:0] snap_index;
+    wire [13:0] snap_index;
     wire [63:0] snap_out, snap_in, snap_identity;
     wire snap_cmd_toggle, snap_reply_toggle;
     wire [79:0] snap_reply, snap_cmd_data;
@@ -484,6 +486,7 @@ module top #(
         .QSPI_WP(QSPI_WP),
         .QSPI_HD(QSPI_HD),
         .AUDIO_ENABLE(system_control[15] && !standby),
+        .WHEEL(volume[6:0]),
         .LEFT(system_control[0] ? 16'd0 : left),
         .RIGHT(system_control[0] ? 16'd0 : right),
         .AUD_MCLK(AUD_MCLK),

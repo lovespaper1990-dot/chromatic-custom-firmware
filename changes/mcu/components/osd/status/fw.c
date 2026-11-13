@@ -17,7 +17,7 @@
 LV_IMG_DECLARE(img_chromatic);
 
 enum {
-    kMaxVerLen = 16,
+    kMaxVerLen = 34,
     kTextH_px  = 5,
 
     kOriginX_px = 73,  // top left corner of right section

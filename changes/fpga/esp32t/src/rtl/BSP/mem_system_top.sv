@@ -2,7 +2,7 @@
 
 module mem_system_top #(parameter ISSIMU=0)
 (
-    input snap_request, input [12:0] snap_index, input snap_read,
+    input snap_request, input [13:0] snap_index, input snap_read,
     input [63:0] snap_out, output [63:0] snap_in, output snap_ack,
     input               xClk,
     input               fClk,
@@ -19,6 +19,7 @@ module mem_system_top #(parameter ISSIMU=0)
     input    [15:0]     RIGHT,
     input               AUD_MCLK,
     input               AUDIO_ENABLE,
+    input      [6:0]    WHEEL,
 
     output              PS_CE_N,
     output              PS_CLK,
@@ -166,6 +167,7 @@ module mem_system_top #(parameter ISSIMU=0)
         .RIGHT(RIGHT),
         .AUD_MCLK(AUD_MCLK),
         .AUDIO_ENABLE(AUDIO_ENABLE),
+        .WHEEL(WHEEL),
         
         .qMenuInit(qMenuInit),
         .qDataValid(qDataValid),

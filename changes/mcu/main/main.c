@@ -1,5 +1,6 @@
 #include "snapshot.h"
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 
 #include "driver/gpio.h"
@@ -81,6 +82,49 @@ static lv_disp_t *disp;
 #define PIXELSPERXFER 16*ROWS_PER_XFER_X10
 #define BYTESPERXFER PIXELSPERXFER*2
 
+static _Atomic unsigned pcm_calls, raw_blocks, output_blocks, spi_timeouts, spi_errors, wheel_replies;
+
+static bool has_signal(const uint8_t *data, size_t length)
+{
+    for (size_t i = 0; i < length; ++i)
+        if (data[i]) return true;
+    return false;
+}
+
+static int report_audio(int argc, char **argv)
+{
+    BTSelection view;
+    BT_GetSelection(0, &view);
+    printf("{\"state\":%d,\"streaming\":%d,\"saved\":%d,\"reconnect\":%d,"
+           "\"wheel\":%d,\"mute\":%d,\"calls\":%u,\"raw\":%u,\"output\":%u,"
+           "\"timeouts\":%u,\"errors\":%u,\"wheel_reads\":%u}\n",
+           view.state, BT_IsStreaming(), view.has_saved, view.auto_reconnect,
+           HeadphoneVolume_GetWheel(), SilentMode_GetState(), pcm_calls, raw_blocks,
+           output_blocks, spi_timeouts, spi_errors, wheel_replies);
+    return 0;
+}
+
+// Poll on the same bus as the PCM data. Older FPGA builds leave MISO
+// undriven for this command; only accept a framed and complemented reply.
+static void read_headphone_wheel(void)
+{
+    static int64_t next_poll_us;
+    int64_t now = esp_timer_get_time();
+    if (now < next_poll_us) return;
+    next_poll_us = now + 25000;
+    spi_transaction_ext_t read = {
+        .base = {.cmd = 0x16, .flags = SPI_TRANS_VARIABLE_ADDR |
+                 SPI_TRANS_VARIABLE_DUMMY | SPI_TRANS_USE_RXDATA, .rxlength = 32},
+        .dummy_bits = 7,
+    };
+    if (spi_device_transmit(spi, &read.base) != ESP_OK) return;
+    const uint8_t *p = read.base.rx_data;
+    if (p[0] == 0x57 && p[1] <= 127 && (p[1] ^ p[2]) == 0xff && p[3] == 0xa6) {
+        HeadphoneVolume_SetStreamWheel(p[1]);
+        ++wheel_replies;
+    }
+}
+
 // One hardware chip select carries both quad OSD writes and standard SPI PCM reads.
 static int32_t read_headphone_audio(uint8_t *data, int32_t size)
 {
@@ -88,10 +132,13 @@ static int32_t read_headphone_audio(uint8_t *data, int32_t size)
     // Stereo 16-bit frames are atomic on the FPGA.
     int32_t length = size & ~3;
     if (length == 0) return 0;
+    ++pcm_calls;
     if (!xSemaphoreTake(spi_gate, pdMS_TO_TICKS(20))) {
+        ++spi_timeouts;
         memset(data, 0, length);
         return length;
     }
+    read_headphone_wheel();
     for (int offset = 0; offset < length;) {
         int chunk = MIN(length - offset, BYTESPERXFER);
         spi_transaction_ext_t read = {
@@ -105,13 +152,16 @@ static int32_t read_headphone_audio(uint8_t *data, int32_t size)
             .dummy_bits = 7,
         };
         if (spi_device_transmit(spi, &read.base) != ESP_OK) {
+            ++spi_errors;
             memset(data + offset, 0, length - offset);
             break;
         }
         offset += chunk;
     }
     xSemaphoreGive(spi_gate);
+    if (has_signal(data, length)) ++raw_blocks;
     HeadphoneVolume_Apply(data, length);
+    if (has_signal(data, length)) ++output_blocks;
     return length;
 }
 
@@ -383,6 +433,8 @@ void app_main(void)
 
     ESP_ERROR_CHECK(esp_console_new_repl_uart(&ReplHWConfig, &ReplConfig, &pRepl));
     esp_console_register_help_command();
+    const esp_console_cmd_t audio_command = {.command = "btaudio", .help = "Read headset and PCM status", .func = report_audio};
+    ESP_ERROR_CHECK(esp_console_cmd_register(&audio_command));
     // All commands must be registered prior to starting the REPL
     ESP_ERROR_CHECK(esp_console_start_repl(pRepl));
 

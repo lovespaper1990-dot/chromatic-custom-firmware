@@ -9,6 +9,7 @@ module QSPI_Slave(
     input               QSPI_HD,
     input               AUD_MCLK,
     input               AUDIO_ENABLE,
+    input      [6:0]    WHEEL,
 
     input      [15:0]   LEFT,
     input      [15:0]   RIGHT,
@@ -24,6 +25,18 @@ module QSPI_Slave(
     // Command 0x015 and the 44.1 kHz phase increment follow Jokippo's
     // chromatic_fpga_bt protocol. Each read returns interleaved S16_LE PCM.
     localparam CMD_AUDIO = 10'h015;
+    localparam CMD_WHEEL = 10'h016;
+    // The codec holds its reading between I2C polls. Require consecutive
+    // synchronized samples to agree before exposing all seven bits together.
+    reg [6:0] wheel_sync1 = 127, wheel_sync2 = 127, wheel_last = 127, wheel_value = 127;
+    always @(posedge QSPI_CLK) begin
+        wheel_sync1 <= WHEEL;
+        wheel_sync2 <= wheel_sync1;
+        wheel_last <= wheel_sync2;
+        if (wheel_last == wheel_sync2) wheel_value <= wheel_sync2;
+    end
+    reg wheel_xfer = 0;
+    reg [31:0] wheel_shift = 0;
     localparam AF_BITS = 11;
     reg [31:0] audio_ram [0:(1 << AF_BITS)-1];
     reg [AF_BITS:0] write_ptr = 0, read_ptr = 0;
@@ -134,7 +147,13 @@ module QSPI_Slave(
         if (QSPI_CS) begin
             bit_index <= 0;
             audio_xfer <= 0;
+            wheel_xfer <= 0;
         end else begin
+            if (qLenReady && !qCommand && qLength == CMD_WHEEL) begin
+                wheel_xfer <= 1;
+                wheel_shift <= {8'h57, 1'b0, wheel_value, 1'b1, ~wheel_value, 8'ha6};
+            end else if (wheel_xfer && qCycleCount >= 18)
+                wheel_shift <= {wheel_shift[30:0], 1'b0};
             if (qLenReady && !qCommand && qLength == CMD_AUDIO)
                 audio_xfer <= 1;
             if (audio_xfer && qCycleCount >= 17) begin
@@ -151,7 +170,8 @@ module QSPI_Slave(
         end
     end
 
-    assign QSPI_MISO = !QSPI_CS && audio_xfer && qCycleCount >= 18 ? (audio_bit & audio_xfer_live) : 1'bz;
+    assign QSPI_MISO = !QSPI_CS && wheel_xfer && qCycleCount >= 18 ? wheel_shift[31] :
+                       !QSPI_CS && audio_xfer && qCycleCount >= 18 ? (audio_bit & audio_xfer_live) : 1'bz;
 
     always@(posedge QSPI_CLK or posedge QSPI_CS)
     begin

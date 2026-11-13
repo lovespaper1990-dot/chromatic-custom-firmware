@@ -18,6 +18,7 @@ enum { STATUS, CAPTURE, RESTORE, IDENTITY };
 static QueueHandle_t replies;
 static atomic_bool busy;
 static atomic_uint transferred;
+static atomic_uint word_count = SNAP_WORDS;
 static _Atomic(const char *) message = "A: Save\nB: Load";
 
 void Snapshot_Init(void)
@@ -34,7 +35,7 @@ bool Snapshot_Busy(void)
 }
 unsigned Snapshot_Percent(void)
 {
-    return 100 * atomic_load(&transferred) / SNAP_WORDS;
+    return 100 * atomic_load(&transferred) / atomic_load(&word_count);
 }
 const char *Snapshot_Status(void)
 {
@@ -80,7 +81,7 @@ static snap_result_t identity(uint8_t id[SNAP_ID_BYTES])
     snap_result_t rc = exchange(CONTROL, &op, 1, prefix, sizeof prefix, reply);
     if (rc != SNAP_OK) return rc;
     memcpy(id, reply + 2, SNAP_ID_BYTES);
-    return (id[0] == 0 && id[1] == 0 && id[2] == 0) ? SNAP_OK : SNAP_UNSUPPORTED;
+    return snap_word_count(id) ? SNAP_OK : SNAP_UNSUPPORTED;
 }
 static snap_result_t command_wait(uint8_t op)
 {
@@ -121,6 +122,7 @@ static snap_result_t run(bool load)
     uint8_t id[SNAP_ID_BYTES], current[SNAP_ID_BYTES];
     snap_result_t rc = identity(id);
     if (rc != SNAP_OK) return rc;
+    atomic_store(&word_count, snap_word_count(id));
     const char *dir = "/sd/SNAP";
     if (mkdir(dir, 0777) != 0 && errno != EEXIST) return SNAP_IO;
     if (!load && (rc = command_wait(CAPTURE)) != SNAP_OK) return rc;
