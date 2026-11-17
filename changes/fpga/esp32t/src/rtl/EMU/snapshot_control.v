@@ -1,4 +1,4 @@
-// ROM-only save-state mailbox. Commands are one-at-a-time; the MCU holds the
+// Save-state mailbox. Commands are one-at-a-time; the MCU holds the
 // command bus until the reply. Both toggle handshakes include two sync stages.
 module snapshot_control #(parameter STALL_BITS = 22) (
     input clk, input reset, input supported, input [63:0] identity,

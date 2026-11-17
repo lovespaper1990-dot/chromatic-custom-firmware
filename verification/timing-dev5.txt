@@ -1,0 +1,10 @@
+Chromatic 4.6-dev5-test final static timing
+Created Time: Tue Nov 17 18:57:50 2026
+Numbers of Paths Analyzed: 57430
+Numbers of Setup Violated Endpoints: 0
+Numbers of Hold Violated Endpoints: 0
+Worst Setup slack (ns): 0.181
+Worst Hold slack (ns): 0.119
+Worst Recovery slack (ns): 0.979
+Worst Removal slack (ns): 0.058
+Original clock frequencies and constraints retained.

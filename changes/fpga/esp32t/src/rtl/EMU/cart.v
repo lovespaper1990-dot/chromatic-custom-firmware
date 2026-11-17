@@ -29,9 +29,15 @@ module cart
     output  reg         CART_RD,
     output  reg         CART_WR = 1'd1,
     output              CART_DATA_DIR_E,
-    output  reg [7:0]   CART_DIN_r1
+    output  reg [7:0]   CART_DIN_r1,
+    input               snapshot_load,
+    input   [63:0]      snapshot_in,
+    output  [63:0]      snapshot_out
 );
 
+    // Both clock domains restore while the speed controller holds the guest
+    // frozen. One hClk-wide load covers two pClk cycles on this board.
+    wire restore_snapshot = snapshot_load && snapshot_in[63:48] == 16'hc507;
     reg CART_DATA_DIR = 1'd0;
   
     assign CART_DATA_DIR_E = ~CART_DATA_DIR;
@@ -44,29 +50,56 @@ module cart
 
     wire [7:0]  CART_DIN; 
     assign CART_DIN = CART_D_IN;
+    // Decode the read request on the preceding positive pClk edge, giving
+    // the CPU address/select logic a full pClk period before the enable FF.
+    // Clear it while frozen so another timeline cannot leave a pending read.
+    reg sample_cart_data = 0;
+    always @(posedge pclk)
+        if (cart_frozen || restore_snapshot) sample_cart_data <= 0;
+        else sample_cart_data <= rd || DMA_on;
     always@(negedge pclk)
     begin
-        if (rd | DMA_on) CART_DIN_r1 <= CART_DIN;
+        if (restore_snapshot) CART_DIN_r1 <= snapshot_in[29:22];
+        else if (!cart_frozen && sample_cart_data) CART_DIN_r1 <= CART_DIN;
     end
+
+    // STOP is a combinational opcode decode in GBse. Only the address latch
+    // needs this observation; the physical timing counter retains the direct
+    // signal. HALT and external DMA keep their original address behavior.
+    reg address_stop = 0;
+    always @(posedge hclk)
+        if (restore_snapshot) address_stop <= snapshot_in[46];
+        else if (gbreset) address_stop <= 0;
+        else if (!cart_frozen) address_stop <= cpu_stop;
 
     reg [3:0] counter;
     wire auplow = (counter == 3)&~cpu_speed;
     wire auphigh = (counter == 1)&cpu_speed;
     wire aup = auplow | auphigh;
     always@(posedge pclk)
-        if(!cart_frozen && (aup|cpu_stop|~cpu_halt|DMA_on))
+        if (restore_snapshot) CART_A <= snapshot_in[45:30];
+        else if(!cart_frozen && (aup|address_stop|~cpu_halt|DMA_on))
             CART_A <= a;
     
     reg DMA_on_r1;
     always@(posedge hclk)
-        DMA_on_r1 <= DMA_on;
+        if (restore_snapshot) DMA_on_r1 <= snapshot_in[0];
+        else if (!cart_frozen) DMA_on_r1 <= DMA_on;
     
     reg p1;
     reg p2;
     reg [1:0] phiCnt;
+    assign snapshot_out = {16'hc507, 1'b0, address_stop, CART_A, CART_DIN_r1, CART_DOUT_r1,
+                           phi, CART_CS, CART_RD, CART_WR, CART_DATA_DIR,
+                           counter, p1, p2, phiCnt, DMA_on_r1};
+
     always@(posedge hclk)
     begin
-        if(gbreset)
+        if (restore_snapshot) begin
+            {CART_DOUT_r1, phi, CART_CS, CART_RD, CART_WR, CART_DATA_DIR,
+             counter, p1, p2, phiCnt} <= snapshot_in[21:1];
+        end
+        else if(gbreset)
         begin
             CART_DATA_DIR <= 1'b0;
             CART_RD <= 1'd1;

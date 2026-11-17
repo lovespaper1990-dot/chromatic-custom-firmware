@@ -8,7 +8,13 @@
  * Header = 4-byte format identifier, 8-byte FPGA ROM identity, BE32 generation.
  * Trailer = CRC32 of header + all words, big endian. */
 enum { HEADER_BYTES = 16 };
-static const uint8_t format[4] = {'C','S','S',1};
+// Version 2 requires the physical cartridge timing state at stream word 64.
+// Old ROM-only snapshots cannot safely resume that bus from another phase.
+static const uint8_t format[4] = {'C','S','S',2};
+static bool cart_timing_valid(uint16_t index, const uint8_t word[SNAP_WORD_BYTES])
+{
+    return index != 64 || (word[0] == 0xc5 && word[1] == 0x07);
+}
 
 uint16_t snap_word_count(const uint8_t id[SNAP_ID_BYTES])
 {
@@ -55,6 +61,7 @@ static snap_result_t read_slot(const char *path, const uint8_t *id, uint32_t *ge
     uint32_t crc = crc_update(UINT32_MAX, header, sizeof header);
     for (uint16_t i = 0; i < words; ++i) {
         if (fread(word, 1, sizeof word, f) != sizeof word) goto done;
+        if (!cart_timing_valid(i, word)) goto done;
         crc = crc_update(crc, word, sizeof word);
         if (same_game && stage) {
             snap_result_t status = stage(i, word);
@@ -87,6 +94,7 @@ static snap_result_t write_slot(const char *path, const uint8_t *id, uint32_t ge
     for (uint16_t i = 0; i < words; ++i) {
         snap_result_t status = capture(i, word);
         if (status != SNAP_OK) { rc = status; goto done; }
+        if (!cart_timing_valid(i, word)) { rc = SNAP_HW; goto done; }
         if (fwrite(word, 1, sizeof word, f) != sizeof word) goto done;
         crc = crc_update(crc, word, sizeof word);
     }

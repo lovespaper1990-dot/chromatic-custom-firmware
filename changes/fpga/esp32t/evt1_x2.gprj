@@ -44,6 +44,9 @@
         <File path="src/rtl/EMU/cart.v" type="file.verilog" enable="1"/>
         <File path="src/rtl/EMU/snapshot_cart.v" type="file.verilog" enable="1"/>
         <File path="src/rtl/EMU/snapshot_control.v" type="file.verilog" enable="1"/>
+        <File path="src/rtl/EMU/snapshot_mbc5.v" type="file.verilog" enable="1"/>
+        <File path="src/rtl/EMU/snapshot_mbc5_bus.v" type="file.verilog" enable="1"/>
+        <File path="src/rtl/EMU/snapshot_mbc5_mapper.v" type="file.verilog" enable="1"/>
         <File path="src/rtl/BSP/snapshot_psram.v" type="file.verilog" enable="1"/>
         <File path="src/rtl/EMU/emu_system_top.v" type="file.verilog" enable="1"/>
         <File path="src/rtl/USB/USBUVCUART/Gowin_PLL_UVC/Gowin_PLL_UVC.v" type="file.verilog" enable="1"/>

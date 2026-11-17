@@ -8,7 +8,31 @@
 
 static int pattern, interrupt_at = -1;
 static unsigned restored;
-static uint8_t byte_at(uint16_t i, int j) { return (uint8_t)(pattern + i * 13 + j); }
+static uint8_t byte_at(uint16_t i, int j) {
+    if (i == 64 && j < 2) return j ? 0x07 : 0xc5;
+    return (uint8_t)(pattern + i * 13 + j);
+}
+/* Produce a structurally complete file with a fresh CRC, so rejection tests
+ * exercise semantic format checks rather than incidental checksum damage. */
+static void rewrite_byte_crc(const char *path, size_t offset, uint8_t value) {
+    FILE *f = fopen(path, "r+b");
+    assert(f && !fseek(f, 0, SEEK_END));
+    long size = ftell(f);
+    assert(size > 4 && offset < (size_t)size - 4 && !fseek(f, 0, SEEK_SET));
+    uint8_t *bytes = malloc((size_t)size);
+    assert(bytes && fread(bytes, 1, (size_t)size, f) == (size_t)size);
+    bytes[offset] = value;
+    uint32_t crc = UINT32_MAX;
+    for (long i = 0; i < size - 4; ++i) {
+        crc ^= bytes[i];
+        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ ((crc & 1) ? 0xedb88320u : 0);
+    }
+    crc = ~crc;
+    for (int i = 0; i < 4; ++i) bytes[size - 4 + i] = crc >> (24 - 8 * i);
+    assert(!fseek(f, 0, SEEK_SET) && fwrite(bytes, 1, (size_t)size, f) == (size_t)size);
+    assert(!fclose(f));
+    free(bytes);
+}
 static snap_result_t capture(uint16_t i, uint8_t word[8]) {
     if (i == interrupt_at) return SNAP_LINK;
     for (int j=0; j<8; ++j) word[j] = byte_at(i, j);
@@ -79,9 +103,16 @@ int main(void) {
     assert(snap_slot(dir, id, false, capture) == SNAP_OK);
     restored = 0;
     assert(snap_slot(dir, id, true, restore) == SNAP_OK && restored == 7269);
+    snprintf(first, sizeof first, "%s/01020305.S0", dir);
+    rewrite_byte_crc(first, 16 + 64 * 8, 0); // Valid CRC, missing cart timing.
+    restored = 0;
+    assert(snap_slot(dir, id, true, restore) == SNAP_INVALID && !restored);
+    rewrite_byte_crc(first, 16 + 64 * 8, 0xc5);
+    rewrite_byte_crc(first, 3, 1); // Legacy CSS1 is explicitly rejected.
+    assert(snap_slot(dir, id, true, restore) == SNAP_INVALID && !restored);
     id[0] = 0x10;
     assert(snap_slot(dir, id, false, capture) == SNAP_UNSUPPORTED);
     snprintf(first, sizeof first, "%s/01020305.S0", dir);
     assert(!unlink(first) && !rmdir(dir));
-    puts("Snapshot persistence: round trip, interrupted write, damaged data/identity fallback and foreign save preservation passed.");
+    puts("Snapshot persistence: round trip, interrupted write, damaged data/identity fallback, foreign save preservation, legacy format and missing cart timing rejection passed.");
 }

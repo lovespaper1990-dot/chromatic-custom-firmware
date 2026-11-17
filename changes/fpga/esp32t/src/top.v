@@ -567,7 +567,8 @@ module top #(
         else cartridge_reset_sync <= {cartridge_reset_sync[0], 1'b1};
 
     wire [14:0] scan_address;
-    wire scan_complete, scan_read_n, scan_supported;
+    wire scan_complete, scan_read_n, scan_supported, scan_write_n, scan_write_active;
+    wire [7:0] scan_write_data;
     reg [1:0] cart_present_sync = 0, cart_reset_n_sync = 0;
     // memrst can last only one fast-clock cycle. Retain that event for the
     // scanner and release its reset on hClk before enabling a new snapshot.
@@ -586,7 +587,8 @@ module top #(
     snapshot_cart u_snapshot_cart (
         .clk(hClk), .ready(scan_ready), .data(core_cart_d_in),
         .address(scan_address), .read_n(scan_read_n), .complete(scan_complete),
-        .supported(scan_supported), .identity(snap_identity)
+        .supported(scan_supported), .identity(snap_identity),
+        .write_n(scan_write_n), .write_data(scan_write_data), .write_active(scan_write_active)
     );
     cartridge_interface u_cartridge_interface (
         .clk(hClk),
@@ -598,10 +600,10 @@ module top #(
         .core_clk(scan_complete && core_cart_clk),
         .core_cs(!scan_complete || core_cart_cs),
         .core_rd(scan_complete ? core_cart_rd : !scan_ready || scan_read_n),
-        .core_wr(!scan_complete || core_cart_wr),
-        .core_d_out(core_cart_d_out),
+        .core_wr(scan_complete ? core_cart_wr : !scan_ready || scan_write_n),
+        .core_d_out(scan_complete ? core_cart_d_out : scan_write_data),
         .core_d_in(core_cart_d_in),
-        .core_data_dir_e(!scan_complete || core_cart_data_dir_e),
+        .core_data_dir_e(scan_complete ? core_cart_data_dir_e : !scan_ready || !scan_write_active),
         .CART_A(CART_A),
         .CART_CLK(CART_CLK),
         .CART_CS(CART_CS),

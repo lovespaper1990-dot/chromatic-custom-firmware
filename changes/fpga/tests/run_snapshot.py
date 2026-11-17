@@ -42,6 +42,9 @@ with tempfile.TemporaryDirectory() as temp:
     for name, sources in [
         ("usb_audio_endpoint_tb", [usb_audio]),
         ("snapshot_mbc5_bus_tb", [rtl / "EMU/snapshot_mbc5_bus.v", rtl / "EMU/snapshot_mbc5_mapper.v"]),
+        ("snapshot_mbc5_tb", [rtl / "EMU" / filename for filename in
+                              ("snapshot_mbc5.v", "snapshot_mbc5_bus.v", "snapshot_mbc5_mapper.v")]),
+        ("snapshot_cart_mbc5_tb", [rtl / "EMU/snapshot_cart.v"]),
         ("snapshot_ram_tb", [rtl / "EMU/CORE/dpramV.v"]),
         ("snapshot_tb", [rtl / "EMU/snapshot_cart.v", rtl / "EMU/snapshot_control.v",
                         rtl / "BSP/snapshot_psram.v"]),
@@ -55,6 +58,11 @@ with tempfile.TemporaryDirectory() as temp:
             params = [f"-Psnapshot_tb.RAM_CODE={ram_code}"] if ram_code else []
             run(ivl + params + ["-s", name, "-o", "model", tests / (name + ".sv"), *sources], temp, True)
             run(vvp + ["model"], temp)
+    if os.environ.get("SNAPSHOT_FULL_ROM") == "1":
+        run(ivl + ["-Psnapshot_cart_mbc5_tb.ROM_CODE=8", "-s", "snapshot_cart_mbc5_tb",
+                   "-o", "full_rom", tests / "snapshot_cart_mbc5_tb.sv",
+                   rtl / "EMU/snapshot_cart.v"], temp, True)
+        run(vvp + ["full_rom"], temp)
 
     # Exercise the board's real cartridge debounce, reset and scanner across
     # both clocks. Unrelated PLL, memory and USB blocks are left unelaborated.
@@ -84,6 +92,17 @@ with tempfile.TemporaryDirectory() as temp:
             subprocess.run([ghdl, "--synth", "--std=08", "--out=verilog", unit],
                            cwd=temp, stdout=netlist, check=True)
         palette_sources.append(translated)
+    # Joint save/load with the real state sequencer, physical MBC5 RAM bridge,
+    # mailbox and independently clocked variable-latency backing memory.
+    for ram_code in (2, 3):
+        run(ivl + [f"-Psnapshot_mbc5_system_tb.RAM_CODE={ram_code}",
+                   "-s", "snapshot_mbc5_system_tb", "-o", "mbc5_system",
+                   tests / "snapshot_mbc5_system_tb.sv",
+                   Path(temp) / "gb_savestates.v", Path(temp) / "speedcontrol.v",
+                   *[rtl / "EMU" / filename for filename in
+                     ("snapshot_mbc5.v", "snapshot_mbc5_bus.v", "snapshot_mbc5_mapper.v",
+                      "snapshot_control.v")]], temp, True)
+        run(vvp + ["mbc5_system"], temp)
     # The USB top contains vendor syntax outside the Icarus subset. Retain
     # its actual pin declaration to check the board's standby wiring.
     usb_ports = re.search(r"^module usbuvcuart_top\b.*?^\);", usb_source, re.M | re.S)
@@ -92,6 +111,8 @@ with tempfile.TemporaryDirectory() as temp:
     run(ivl + ["-i", "-s", "standby_tb", "-o", "standby", tests / "standby_tb.sv",
                project / "src/top.v", usb_stub, Path(temp) / "speedcontrol.v",
                rtl / "EMU/emu_system_top.v", rtl / "EMU/cart.v",
+               rtl / "EMU/snapshot_mbc5.v", rtl / "EMU/snapshot_mbc5_bus.v",
+               rtl / "EMU/snapshot_mbc5_mapper.v",
                rtl / "BSP/system_monitor.sv", rtl / "BSP/button_debounce.v",
                rtl / "BSP/mem_system_top.sv", rtl / "BSP/aud_system_top_8_16.sv",
                rtl / "BSP/polling_master_8_16.v"], temp, True)
@@ -99,6 +120,10 @@ with tempfile.TemporaryDirectory() as temp:
     run(ivl + ["-s", "cart_standby_tb", "-o", "cart_standby",
                tests / "cart_standby_tb.sv", rtl / "EMU/cart.v", Path(temp) / "speedcontrol.v"], temp, True)
     run(vvp + ["cart_standby"], temp)
+    run(ivl + ["-s", "cart_snapshot_tb", "-o", "cart_snapshot",
+               tests / "cart_snapshot_tb.sv", rtl / "EMU/cart.v",
+               Path(temp) / "speedcontrol.v"], temp, True)
+    run(vvp + ["cart_snapshot"], temp)
 
     palette_sources.extend(rtl / "EMU/CORE" / name for name in ("video.v", "sprites.v", "dpramV.v"))
     run(ivl + ["-s", "snapshot_palette_tb", "-o", "palette", *palette_sources], temp, True)
@@ -138,3 +163,18 @@ with tempfile.TemporaryDirectory() as temp:
     run([ghdl, "-m", "--std=08", "-fsynopsys", "standby_cpu_tb"], vhdl_work, True)
     run([ghdl, "-r", "--std=08", "-fsynopsys", "standby_cpu_tb",
          "--assert-level=error", "--ieee-asserts=disable"], vhdl_work)
+
+    # Compare resumed instruction/data traces after loading an earlier CPU and
+    # physical-cart snapshot at a different running phase, at both CPU speeds.
+    translated_cpu = Path(temp) / "gbse.v"
+    with translated_cpu.open("w") as netlist:
+        subprocess.run([ghdl, "--synth", "--std=08", "-fsynopsys", "--out=verilog", "gbse"],
+                       cwd=vhdl_work, stdout=netlist, check=True)
+    run(ivl + ["-s", "snapshot_cart_cpu_tb", "-o", "cart_cpu",
+               tests / "snapshot_cart_cpu_tb.sv", translated_cpu,
+               rtl / "EMU/cart.v", Path(temp) / "speedcontrol.v"], temp, True)
+    run(vvp + ["cart_cpu"], temp)
+    run(ivl + ["-s", "snapshot_cart_sleep_cpu_tb", "-o", "cart_sleep_cpu",
+               tests / "snapshot_cart_sleep_cpu_tb.sv", translated_cpu,
+               rtl / "EMU/cart.v", Path(temp) / "speedcontrol.v"], temp, True)
+    run(vvp + ["cart_sleep_cpu"], temp)

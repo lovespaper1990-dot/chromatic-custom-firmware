@@ -1,0 +1,35 @@
+{
+  "firmware": "4.6-dev5-test",
+  "date": "2026-11-17",
+  "hardware_tested": false,
+  "checks": {
+    "c_snapshot_persistence_css2": true,
+    "c_bluetooth_volume": true,
+    "fpga_regressions": true,
+    "full_8_mib_rom_512_banks": true,
+    "physical_ram_8_kib_32_kib_round_trip": true,
+    "real_cpu_cart_trace_both_speeds": true,
+    "physical_cart_state_negative_control": true,
+    "personal_paths_mac_and_tokens_scan": true,
+    "fpga_static_timing": true
+  },
+  "pending": [
+    "Physical cartridge + FAT32 microSD save/load testing"
+  ],
+  "limitations": [
+    "MBC5 19/1A/1B only plus 32KiB ROM-only",
+    "CSS1 snapshots rejected; save new CSS2 snapshots",
+    "No link-state guarantee; single-player testing",
+    "Restoring a snapshot also rewinds cartridge battery-backed RAM"
+  ],
+  "timing": {
+    "Created Time": "Tue Nov 17 18:57:50 2026",
+    "Numbers of Paths Analyzed": "57430",
+    "Numbers of Setup Violated Endpoints": "0",
+    "Numbers of Hold Violated Endpoints": "0",
+    "Worst Setup slack (ns)": 0.181,
+    "Worst Hold slack (ns)": 0.119,
+    "Worst Recovery slack (ns)": 0.979,
+    "Worst Removal slack (ns)": 0.058
+  }
+}

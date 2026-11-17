@@ -1,0 +1,19 @@
+MBC5 full-ROM scanner simulation, 2026-11-17
+Default ROM_CODE=3: 262144 bytes; independent CRC32 c39827b4; PASS.
+Full ROM_CODE=8: 8388608 bytes; independent CRC32 85bb0839; PASS.
+512 banks were checked in order, including all 16384 bytes of bank 256.
+Boot ROM bank 1 restoration, reset/ejection and unsupported header rejection: PASS.
+Reproduce with SNAPSHOT_FULL_ROM=1 ./verification/run.sh (slow Icarus simulation).
+No commercial ROM or save was used.
+
+Negative control for snapshot_cart_cpu_tb:
+Disabling cart.snapshot_load while removing direct cart-state checks still
+failed at double-speed trial 0 / trace step 4, PC 0005, as expected.
+This confirms the execution trace detects missing physical-cart state.
+
+Before/after DI+STOP control timing optimization:
+53390 actual CPU enable traces (address, DI/DO, RD/WR, TSTATE, counter/marker)
+were byte-identical across both speeds and snapshot trials.
+Trace SHA256: cd9642e85ef66e654a2b7cb295691c058ba9dc305f833e12cf46e0ec09263e92.
+HALT/INT/STOP/external DMA test also passed original and retimed cart logic
+with identical execution and total simulated duration.

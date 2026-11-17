@@ -179,18 +179,47 @@ module emu_system_top
     reg gbreset;
     wire DMA_on;
     wire cart_frozen;
+    wire mbc5_enabled = POWER_GOOD && (snap_identity[63:56] == 8'h19 ||
+                         snap_identity[63:56] == 8'h1a || snap_identity[63:56] == 8'h1b);
+    wire snapshot_cart_owner;
+    wire [15:0] game_cart_a;
+    wire [7:0] game_cart_out;
+    wire game_cart_clk, game_cart_cs, game_cart_rd, game_cart_wr, game_cart_input_dir;
+    wire [15:0] state_cart_a;
+    wire [7:0] state_cart_out;
+    wire state_cart_rd, state_cart_wr, state_cart_cs, state_cart_input_dir;
+    wire [63:0] cart_state_out, ext_state_data;
+    wire [9:0] ext_state_addr;
+    wire ext_state_write, ext_state_reset;
+    reg [63:0] cart_state_staged = 0;
+    // Extension register 63 (stream word 64) is unused by the GB core.
+    // Stage it with the rest of the core and apply it only after a full load.
+    always @(posedge hclk) begin
+        if (snapshot_power_reset || !POWER_GOOD || ext_state_reset)
+            cart_state_staged <= 0;
+        else if (ext_state_write && ext_state_addr == 10'd63)
+            cart_state_staged <= ext_state_data;
+    end
+    assign CART_A = snapshot_cart_owner ? state_cart_a : game_cart_a;
+    assign CART_D_OUT = snapshot_cart_owner ? state_cart_out : game_cart_out;
+    assign CART_CLK = !snapshot_cart_owner && game_cart_clk;
+    assign CART_CS = snapshot_cart_owner ? state_cart_cs : game_cart_cs;
+    assign CART_RD = snapshot_cart_owner ? state_cart_rd : game_cart_rd;
+    assign CART_WR = snapshot_cart_owner ? state_cart_wr : game_cart_wr;
+    assign CART_DATA_DIR_E = snapshot_cart_owner ? state_cart_input_dir : game_cart_input_dir;
     // A core transfer waiting for VBlank must finish before entering standby.
     wire standby_pause = standby && POWER_GOOD && !gbreset && !ss_active;
+    wire freeze_cart = standby_pause | sleep_savestate | snapshot_cart_owner;
     speedcontrol u_speedcontrol
     (
         .clk_sys     (hclk),
-        .pause       (sleep_savestate | standby_pause),
+        .pause       (freeze_cart),
         .speedup     (1'b0),
-        .cart_act    (rd | wr | (standby_pause && (DMA_on || !CART_WR || !CART_DATA_DIR_E))),
+        .cart_act    (rd | wr | (freeze_cart && (DMA_on || !game_cart_wr || !game_cart_input_dir))),
         .DMA_on      (1'b0),
         .ce          (ce),
         .ce_2x       (ce_2x),
-        .standby_req (standby_pause),
+        .standby_req (freeze_cart),
         .cart_frozen (cart_frozen),
         .refresh     (),
         .ff_on       ()
@@ -280,15 +309,17 @@ module emu_system_top
        .DMA_on          (DMA_on         ),
        .hdma_active     (hdma_active    ),
                                         
-       .CART_A          (CART_A         ),
-       .CART_CLK        (CART_CLK       ),
-       .CART_CS         (CART_CS        ),
+       .CART_A          (game_cart_a    ),
+       .CART_CLK        (game_cart_clk  ),
+       .CART_CS         (game_cart_cs   ),
        .CART_D_IN       (CART_D_IN      ),
-       .CART_D_OUT      (CART_D_OUT     ),
-       .CART_RD         (CART_RD        ),
-       .CART_WR         (CART_WR        ),
-       .CART_DATA_DIR_E (CART_DATA_DIR_E),
-       .CART_DIN_r1     (CART_DIN_r1    )
+       .CART_D_OUT      (game_cart_out  ),
+       .CART_RD         (game_cart_rd   ),
+       .CART_WR         (game_cart_wr   ),
+       .CART_DATA_DIR_E (game_cart_input_dir),
+       .CART_DIN_r1     (CART_DIN_r1    ),
+       .snapshot_load  (ss_loaded), .snapshot_in(cart_state_staged),
+       .snapshot_out(cart_state_out)
     );
 
     wire sc_int_clock2;
@@ -327,18 +358,35 @@ module emu_system_top
     wire SAVE_out_ena  ;                                    
     wire SAVE_out_done ; 
     
+    wire bridge_req, bridge_read, bridge_done;
+    wire [25:0] bridge_addr;
+    wire [63:0] bridge_out;
+    snapshot_mbc5 u_snapshot_mbc5 (
+        .clk(hclk), .reset(snapshot_power_reset || !POWER_GOOD),
+        .enabled(mbc5_enabled), .ram_code(snap_identity[47:40]),
+        .active(ss_active), .abort(ss_abort), .restart_core(ss_restart),
+        .core_req(SAVE_out_ena), .core_read(SAVE_out_rnw), .core_addr(SAVE_out_Adr),
+        .core_out(SAVE_out_Din), .core_done(SAVE_out_done), .core_in(SAVE_out_Dout),
+        .mem_req(bridge_req), .mem_read(bridge_read), .mem_addr(bridge_addr),
+        .mem_out(bridge_out), .mem_done(bridge_done), .mem_in(snap_in),
+        .game_addr(game_cart_a), .game_out(game_cart_out), .game_write_n(game_cart_wr),
+        .cart_in(CART_D_IN), .take_bus(snapshot_cart_owner),
+        .cart_addr(state_cart_a), .cart_out(state_cart_out), .cart_read_n(state_cart_rd),
+        .cart_write_n(state_cart_wr), .cart_cs_n(state_cart_cs), .cart_input_dir(state_cart_input_dir)
+    );
+
     snapshot_control u_snapshot_control (
         .clk(hclk), .reset(snapshot_power_reset), .supported(snap_supported && !gbreset && !boot_rom_enabled),
         .identity(snap_identity), .cmd_toggle(snap_cmd_toggle), .cmd(snap_cmd),
         .cmd_data(snap_cmd_data), .reply_toggle(snap_reply_toggle), .reply(snap_reply),
         .capture(ss_save), .restore(ss_load), .core_busy(ss_busy),
         .core_loaded(ss_loaded), .core_abort(ss_abort), .active(ss_active), .restart_core(ss_restart),
-        .core_req(SAVE_out_ena), .core_read(SAVE_out_rnw), .core_addr(SAVE_out_Adr),
-        .core_out(SAVE_out_Din), .core_done(SAVE_out_done), .mem_toggle(snap_request),
+        .core_req(bridge_req), .core_read(bridge_read), .core_addr(bridge_addr),
+        .core_out(bridge_out), .core_done(bridge_done), .mem_toggle(snap_request),
         .mem_index(snap_index), .mem_read(snap_read), .mem_out(snap_out),
         .mem_ack(snap_ack), .mem_in(snap_in)
     );
-    assign SAVE_out_Dout = snap_in;
+
 
     wire [15:0] snd_l;  
     wire [15:0] snd_r;  
@@ -435,18 +483,18 @@ module emu_system_top
 
         // savestates
         .increaseSSHeaderCount(1'd0),
-        .cart_ram_size(8'd0),
+        .cart_ram_size(snap_identity[47:40]),
         .save_state(ss_save),
         .snapshot_busy(ss_busy), .snapshot_abort(ss_abort), .snapshot_active(ss_active),
         .load_state(ss_load),
         .savestate_number(2'd0),
         .sleep_savestate(sleep_savestate),
 
-        .SaveStateExt_Din(), 
-        .SaveStateExt_Adr(), 
-        .SaveStateExt_wren(),
-        .SaveStateExt_rst(), 
-        .SaveStateExt_Dout(64'd0),
+        .SaveStateExt_Din(ext_state_data),
+        .SaveStateExt_Adr(ext_state_addr),
+        .SaveStateExt_wren(ext_state_write),
+        .SaveStateExt_rst(ext_state_reset),
+        .SaveStateExt_Dout(ext_state_addr == 10'd63 ? cart_state_out : 64'd0),
         .SaveStateExt_load(ss_loaded),
 
         .Savestate_CRAMAddr(),     
