@@ -1,16 +1,17 @@
 // Save-state mailbox. Commands are one-at-a-time; the MCU holds the
 // command bus until the reply. Both toggle handshakes include two sync stages.
-module snapshot_control #(parameter STALL_BITS = 22) (
+module snapshot_control #(parameter STALL_BITS = 22, parameter DIAGNOSTICS = 0) (
     input clk, input reset, input supported, input [63:0] identity,
     input cmd_toggle, input [6:0] cmd, input [79:0] cmd_data,
     output reg reply_toggle = 0, output reg [79:0] reply = 0,
     output reg capture = 0, output reg restore = 0,
     input core_busy, input core_req, input core_read, input [25:0] core_addr,
     input [63:0] core_out, output reg core_done = 0,
-    output reg mem_toggle = 0, output reg [13:0] mem_index,
+    output reg mem_toggle = 0, output reg [13:0] mem_index = 0,
     output reg mem_read, output reg [63:0] mem_out,
     input mem_ack, input [63:0] mem_in, input core_loaded,
-    output reg core_abort = 0, output reg restart_core = 0, output active
+    output reg core_abort = 0, output reg restart_core = 0, output active,
+    input [15:0] debug_flags
 );
     // The cartridge probe gates supported mapper geometries before this mailbox.
     wire [13:0] words = identity[47:40] == 3 ? 14'd10341 :
@@ -23,11 +24,18 @@ module snapshot_control #(parameter STALL_BITS = 22) (
     reg cmd_seen = 0;
     reg busy_seen = 0, staged = 0, loaded = 0, header_committed = 0;
     reg [7:0] last_result = 0;
+    reg [15:0] debug_seen = 0;
+    reg req_seen = 0;
+    reg [63:0] frozen_debug = 0;
     reg [STALL_BITS-1:0] stall_count = 0;
     wire memory_pending = owner != NONE && ack_sync[1] != mem_toggle;
     wire work_pending = operation != IDLE || owner == READ || owner == WRITE;
     wire failed = work_pending && (!supported || (&stall_count));
     assign active = operation != IDLE;
+    wire [63:0] debug_payload = {debug_flags, debug_seen | debug_flags,
+        mem_index, operation, owner, busy_seen, core_busy, memory_pending,
+        header_committed, req_seen | core_req, core_req, core_read,
+        core_loaded, mem_toggle, ack_sync[1], 3'b000};
     reg [13:0] next_word = 0;
     wire [15:0] index = cmd == 7'h22 ? cmd_data[79:64] : cmd_data[15:0];
 
@@ -46,6 +54,10 @@ module snapshot_control #(parameter STALL_BITS = 22) (
         core_done <= 0;
         core_abort <= 0;
         restart_core <= 0;
+        if (operation != IDLE) begin
+            if (DIAGNOSTICS) debug_seen <= debug_seen | debug_flags;
+            if (DIAGNOSTICS) req_seen <= req_seen | core_req;
+        end
         if (reset) begin
             owner <= NONE;
             operation <= IDLE;
@@ -57,9 +69,14 @@ module snapshot_control #(parameter STALL_BITS = 22) (
             loaded <= 0;
             stall_count <= 0;
             last_result <= 0;
+            mem_index <= 0;
+            if (DIAGNOSTICS) debug_seen <= 0;
+            if (DIAGNOSTICS) req_seen <= 0;
+            if (DIAGNOSTICS) frozen_debug <= 0;
         end else if (failed) begin
             // A missing VBlank, clock pause or memory completion cannot leave
             // the guest frozen. Ignore a late RAM acknowledgement after abort.
+            if (DIAGNOSTICS) frozen_debug <= debug_payload;
             core_abort <= operation != IDLE;
             restart_core <= operation == LOADING;
             if (owner == READ || owner == WRITE)
@@ -85,10 +102,14 @@ module snapshot_control #(parameter STALL_BITS = 22) (
                 if (busy_seen && !core_busy) begin
                     if (operation == SAVING) begin
                         staged <= supported && header_committed;
-                        if (!header_committed) last_result <= 3;
+                        if (!header_committed) begin
+                            last_result <= 3;
+                            if (DIAGNOSTICS) frozen_debug <= debug_payload;
+                        end
                     end
                     if (operation == LOADING && !(loaded || core_loaded)) begin
                         last_result <= 3;
+                        if (DIAGNOSTICS) frozen_debug <= debug_payload;
                         staged <= 0;
                     end
                     operation <= IDLE;
@@ -143,6 +164,9 @@ module snapshot_control #(parameter STALL_BITS = 22) (
                                     operation <= LOADING;
                                     restore <= 1;
                                 end
+                                if (DIAGNOSTICS) debug_seen <= 0;
+                                if (DIAGNOSTICS) req_seen <= 0;
+                                if (DIAGNOSTICS) frozen_debug <= 0;
                                 busy_seen <= 0;
                                 loaded <= 0;
                                 header_committed <= 0;
@@ -156,6 +180,10 @@ module snapshot_control #(parameter STALL_BITS = 22) (
                                 reply <= {16'hfff1, identity};
                                 reply_toggle <= ~reply_toggle;
                             end
+                        end
+                        4: begin
+                            reply <= {16'hfff2, DIAGNOSTICS ? frozen_debug : 64'd0};
+                            reply_toggle <= ~reply_toggle;
                         end
                         default: respond_status(cmd_data[7:0], 3);
                     endcase

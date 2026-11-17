@@ -1,0 +1,11 @@
+Gowin V1.9.12.04-1, GW5A-EV25UG256CC1/I0 A
+All routes completed; original clocks and SDC retained.
+Setup violations: 0, worst +1.475 ns
+Hold violations: 0, worst +0.134 ns
+Recovery worst +0.185 ns
+Removal worst +0.256 ns
+Pulse width worst +1.958 ns
+57765 timing paths, 35123 endpoints
+BIN SHA256 726d905506f96543fa2123b60394b37181993ac524d738ca08476184c574a9de
+SYN structure guard + 70 exact word-count checks + 44 full-regression PASS.
+Hardware save/load acceptance remains pending.

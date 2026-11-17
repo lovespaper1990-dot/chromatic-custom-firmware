@@ -11,7 +11,9 @@ entity gb_savestates is
    (
       clk                     : in     std_logic;  
       reset_in                : in     std_logic;
-      abort_state             : in     std_logic := '0';
+      -- Connected explicitly across the Verilog boundary. Gowin can misbind
+      -- this input when a VHDL port default is present.
+      abort_state             : in     std_logic;
       reset_out               : out    std_logic := '0';
             
       load_done               : out    std_logic := '0';
@@ -30,7 +32,8 @@ entity gb_savestates is
       BUS_Adr                 : buffer std_logic_vector(BUS_busadr-1 downto 0) := (others => '0');
       BUS_wren                : out    std_logic := '0';
       BUS_rst                 : out    std_logic := '0';
-      BUS_Dout                : in     std_logic_vector(BUS_buswidth-1 downto 0) := (others => '0');
+      -- This input is also explicitly wired; avoid Gowin's default-port aliasing.
+      BUS_Dout                : in     std_logic_vector(BUS_buswidth-1 downto 0);
             
       loading_savestate       : out    std_logic := '0';
       saving_savestate        : out    std_logic := '0';
@@ -66,15 +69,25 @@ architecture arch of gb_savestates is
    
    constant SAVETYPESCOUNT : integer := 5;
    signal savetype_counter : integer range 0 to SAVETYPESCOUNT;
-   type t_savetypes is array(0 to SAVETYPESCOUNT - 1) of integer;
-   signal savetypes : t_savetypes := 
-   (
-      32768, -- RAM
-      16384, -- VRAM
-      160,   -- OAM
-      128,   -- ZeroPage
-      131072 -- Saveram -> overwritten depending on cart_ram_size
-   );
+   -- Select word counts directly. Gowin leaves constant members of a partially
+   -- updated integer array undriven and can alias their bits to unrelated nets.
+   function words_for_type(type_index : integer; ramcode : std_logic_vector(7 downto 0)) return integer is
+   begin
+      case type_index is
+         when 0 => return 4096; -- WRAM
+         when 1 => return 2048; -- VRAM
+         when 2 => return 20;   -- OAM
+         when 3 => return 16;   -- ZeroPage
+         when others =>
+            case ramcode is
+               when x"00" => return 64;    -- MBC2
+               when x"01" => return 256;   -- 2 KiB
+               when x"02" => return 1024;  -- 8 KiB
+               when x"03" => return 4096;  -- 32 KiB
+               when others => return 16384; -- 128 KiB
+            end case;
+      end case;
+   end function;
 
    type tstate is
    (
@@ -136,14 +149,6 @@ begin
          
          bus_out_be    <= x"FF";
          
-         case (cart_ram_size) is
-            when x"00"  => savetypes(4) <=    512; -- for MBC2
-            when x"01"  => savetypes(4) <=   2048; -- 2   KByte
-            when x"02"  => savetypes(4) <=   8192; -- 8   KByte
-            when x"03"  => savetypes(4) <=  32768; -- 32  KByte
-            when others => savetypes(4) <= 131072; -- 128 KByte 
-         end case;
-   
          case state is
          
             when IDLE =>
@@ -208,7 +213,7 @@ begin
                   state        <= SAVEMEMORY_FIRST;
                   bytecounter  <= 0;
 
-                  words_remaining <= savetypes(savetype_counter) / 8 - 1;
+                  words_remaining <= words_for_type(savetype_counter, cart_ram_size) - 1;
                   Save_RAMAddr <= (others => '0');
                else
                   state          <= SAVESIZEAMOUNT;
@@ -311,7 +316,7 @@ begin
                if (savetype_counter < SAVETYPESCOUNT) then
                   state          <= LOADMEMORY_READ;
 
-                  words_remaining <= savetypes(savetype_counter) / 8 - 1;
+                  words_remaining <= words_for_type(savetype_counter, cart_ram_size) - 1;
                   -- Preincrement in LOADMEMORY_WRITE, including the first byte at zero.
                   Save_RAMAddr   <= (others => '1');
                   bytecounter    <= 0;

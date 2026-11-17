@@ -4,7 +4,7 @@
 // The reference is a continuation of the captured machine, not a second CPU
 // implementation. After perturbing the machine, restoring must reproduce that
 // continuation at every guest enable, including the instruction-fetch bytes.
-module snapshot_cart_cpu_case #(parameter SPEED = 0)(output reg passed = 0);
+module snapshot_cart_cpu_case #(parameter SPEED = 0, parameter AUTO_CAPTURE = 0)(output reg passed = 0);
     localparam TRACE_LENGTH = 256;
     localparam TRIALS = 32;
     reg hclk = 0, pclk = 1;
@@ -13,6 +13,11 @@ module snapshot_cart_cpu_case #(parameter SPEED = 0)(output reg passed = 0);
 
     reg cold_reset = 1, cpu_restore = 0, request = 0, boot_overlay = 1;
     wire ce, ce2, frozen;
+    wire engine_sleep, auto_busy;
+    wire pause_request = request || engine_sleep;
+    reg auto_save = 0;
+    integer auto_requests = 0, auto_headers = 0, auto_manager_requests = 0;
+    wire [9:0] engine_reg_addr;
     wire cpu_enable = SPEED ? ce2 : ce;
     wire [15:0] cpu_addr;
     wire [7:0] cpu_out, cpu_in;
@@ -24,9 +29,9 @@ module snapshot_cart_cpu_case #(parameter SPEED = 0)(output reg passed = 0);
     wire [7:0] cart_out, cart_latched;
     wire cart_phi, cart_cs_n, cart_rd_n, cart_wr_n, cart_input_dir;
     wire bus_active = cart_read || cart_write ||
-                      (request && (!cart_wr_n || !cart_input_dir));
+                      (pause_request && (!cart_wr_n || !cart_input_dir));
     speedcontrol clocks(
-        .clk_sys(hclk), .pause(request), .standby_req(request), .cart_frozen(frozen),
+        .clk_sys(hclk), .pause(pause_request), .standby_req(pause_request), .cart_frozen(frozen),
         .speedup(1'b0), .cart_act(bus_active), .DMA_on(1'b0), .ce(ce), .ce_2x(ce2)
     );
 
@@ -39,9 +44,80 @@ module snapshot_cart_cpu_case #(parameter SPEED = 0)(output reg passed = 0);
         .WAIT_n(1'b1), .INT_n(1'b1), .NMI_n(1'b1), .BUSRQ_n(1'b1),
         .RD_n(cpu_rd_n), .WR_n(cpu_wr_n), .HALT_n(cpu_halt_n), .STOP(cpu_stop),
         .WRITE_CYCLE(write_cycle), .TSTATEo(tstate), .A(cpu_addr), .DI(cpu_in), .DO(cpu_out),
-        .isGBC(1'b1), .SaveStateBus_Din(ss_data), .SaveStateBus_Adr(ss_addr),
+        .isGBC(1'b1), .SaveStateBus_Din(ss_data), .SaveStateBus_Adr(AUTO_CAPTURE ? engine_reg_addr : ss_addr),
         .SaveStateBus_wren(ss_write), .SaveStateBus_rst(cold_reset), .SaveStateBus_Dout(ss_readback)
     );
+
+
+    generate
+        if (AUTO_CAPTURE) begin : automatic_capture
+            wire manager_save;
+            wire [31:0] state_address;
+            wire raw_req, raw_read;
+            wire [25:0] raw_addr;
+            wire [63:0] raw_data;
+            reg raw_done = 0, pending = 0;
+            integer delay_cycles = 0;
+            // Use the same request manager, slot address and sleep output as
+            // gb.v. This case tests capture entry and completion with an actual
+            // running CPU. Fixed RAM read bytes deliberately do not validate
+            // game RAM contents, GPU/DMA state or real PSRAM transactions.
+            gb_statemanager manager(
+                .clk(hclk), .reset(cold_reset), .rewind_on(1'b0), .rewind_active(1'b0),
+                .savestate_number(32'd0), .save(auto_save), .load(1'b0), .sleep_rewind(),
+                .vsync(1'b1), .request_savestate(manager_save), .request_loadstate(),
+                .request_address(state_address), .request_busy(auto_busy)
+            );
+            gb_savestates engine(
+                .clk(hclk), .reset_in(cold_reset), .abort_state(1'b0), .reset_out(),
+                .load_done(), .increaseSSHeaderCount(1'b0), .save(manager_save), .load(1'b0),
+                .savestate_address(state_address), .savestate_busy(auto_busy),
+                .cart_ram_size(8'd0), .lcd_vsync(1'b1), .BUS_Din(), .BUS_Adr(engine_reg_addr),
+                .BUS_wren(), .BUS_rst(), .BUS_Dout(ss_readback), .sleep_savestate(engine_sleep),
+                .clock_ena_in(ce2), .Save_RAMAddr(), .Save_RAMWrEn(), .Save_RAMWriteData(),
+                .Save_RAMReadData_WRAM(8'd0), .Save_RAMReadData_VRAM(8'd0),
+                .Save_RAMReadData_ORAM(8'd0), .Save_RAMReadData_ZRAM(8'd0),
+                .Save_RAMReadData_CRAM(8'd0), .bus_out_Din(raw_data), .bus_out_Dout(64'd0),
+                .bus_out_Adr(raw_addr), .bus_out_rnw(raw_read), .bus_out_ena(raw_req),
+                .bus_out_done(raw_done)
+            );
+            always @(posedge hclk) begin
+                raw_done <= 0;
+                if (cold_reset || auto_save) begin
+                    auto_requests <= 0;
+                    auto_headers <= 0;
+                    auto_manager_requests <= 0;
+                    pending <= 0;
+                end else begin
+                    if (manager_save) auto_manager_requests <= auto_manager_requests + 1;
+                    if (raw_req) begin
+                        if (pending || raw_read || !frozen || ce || ce2 ||
+                            cart_read || cart_write || !cart_wr_n || !cart_input_dir)
+                            $fatal(1, "Automatic capture requested memory before CPU/cart freeze speed=%0d", SPEED);
+                        if (raw_addr !== 26'h3800000 + (auto_requests == 6308 ? 0 : (auto_requests + 1)*2))
+                            $fatal(1, "Automatic capture address/commit order mismatch speed=%0d word=%0d address=%h", SPEED, auto_requests, raw_addr);
+                        if (auto_requests == 6308) begin
+                            if (raw_data[63:32] !== 32'h0000b0ca)
+                                $fatal(1, "Automatic capture did not commit header last");
+                            auto_headers <= auto_headers + 1;
+                        end
+                        auto_requests <= auto_requests + 1;
+                        pending <= 1;
+                        delay_cycles <= 1 + auto_requests % 5;
+                    end else if (pending && delay_cycles > 0)
+                        delay_cycles <= delay_cycles - 1;
+                    else if (pending) begin
+                        raw_done <= 1;
+                        pending <= 0;
+                    end
+                end
+            end
+        end else begin : manual_capture
+            assign engine_sleep = 0;
+            assign auto_busy = 0;
+            assign engine_reg_addr = 0;
+        end
+    endgenerate
 
     function automatic [7:0] rom(input [15:0] address);
         // LD HL,$C000; INC (HL); LD A,(HL); XOR $A5;
@@ -149,6 +225,43 @@ module snapshot_cart_cpu_case #(parameter SPEED = 0)(output reg passed = 0);
         tick();
     endtask
 
+
+    task capture_from_cpu_phase(input integer phase);
+        integer waited;
+        reg [116:0] frozen_trace;
+        reg [7:0] before_resume;
+        begin
+            waited = 0;
+            // Include one instruction read explicitly; the counter program also
+            // visits these phases while operating on internal RAM.
+            while ((cartridge.counter != phase || (phase == (SPEED ? 4 : 8) && !cart_read)) && waited < 1024)
+                begin tick(); waited = waited + 1; end
+            if (cartridge.counter != phase || (phase == (SPEED ? 4 : 8) && !cart_read))
+                $fatal(1, "Requested CPU/cart phase not reached");
+            requested_phases[phase] = 1;
+            if (cart_read) request_during_read = request_during_read + 1;
+            #0.3; auto_save = 1; tick(); auto_save = 0;
+            waited = 0;
+            while (auto_requests == 0 && waited < 256) begin tick(); waited = waited + 1; end
+            if (auto_requests == 0 || !auto_busy || !frozen)
+                $fatal(1, "CPU-driven capture failed to reach first request speed=%0d phase=%0d", SPEED, phase);
+            frozen_trace = execution_trace;
+            waited = 0;
+            while (auto_busy && waited < 160000) begin
+                tick(); waited = waited + 1;
+                if (ce || ce2 || !frozen || execution_trace !== frozen_trace)
+                    $fatal(1, "CPU/cart advanced during autonomous capture speed=%0d phase=%0d", SPEED, phase);
+            end
+            if (auto_busy || auto_requests != 6309 || auto_headers != 1 || auto_manager_requests != 1)
+                $fatal(1, "Incomplete autonomous capture speed=%0d requests=%0d headers=%0d manager=%0d", SPEED, auto_requests, auto_headers, auto_manager_requests);
+            before_resume = counter;
+            waited = 0;
+            while (counter == before_resume && waited < 2048) begin tick(); waited = waited + 1; end
+            if (counter == before_resume || frozen)
+                $fatal(1, "CPU failed to continue after autonomous capture speed=%0d", SPEED);
+        end
+    endtask
+
     reg [7:0] continuation_counter;
     initial begin
         repeat (20) tick(); cold_reset = 0;
@@ -157,37 +270,46 @@ module snapshot_cart_cpu_case #(parameter SPEED = 0)(output reg passed = 0);
         // cartridge timing generator to settle before the first external fetch.
         // Remove this small overlay before all snapshot/reference trials.
         pause_machine(); boot_overlay = 0; resume_machine();
-        for (trial = 0; trial < TRIALS; trial = trial + 1) begin
-            // The requests span every hClk phase and many CPU microstates.
-            repeat (1 + ((trial * 37) % 91)) tick();
-            #0.3;
-            requested_phases[cartridge.counter] = 1;
-            if (tstate <= 4) requested_tstates[tstate] = 1;
-            if (cart_read) request_during_read = request_during_read + 1;
-            pause_machine(); capture_machine();
-            continue_machine(0);
-            continuation_counter = counter;
-            if (counter == saved_counter) $fatal(1, "Reference failed to execute counter program");
-            // Advance past the reference and stop at a different physical
-            // phase. Reloading the CPU alone must not pass this comparison.
-            repeat (67 + ((trial * 19) % 101)) tick();
-            pause_machine(); restore_machine();
-            continue_machine(1);
-            if (counter !== continuation_counter)
-                $fatal(1, "Counter continuation differs speed=%0d", SPEED);
+        if (AUTO_CAPTURE) begin
+            for (trial = 0; trial < 4; trial = trial + 1)
+                capture_from_cpu_phase(trial * (SPEED ? 2 : 4));
+            if ($countones(requested_phases) != 4 || !request_during_read)
+                $fatal(1, "Insufficient autonomous request-phase/read coverage");
+            $display("PASS real CPU -> manager -> state engine capture speed=%0d: four phases=%h, 6309 requests each, frozen execution, last header and resumed counter", SPEED, requested_phases);
+            passed = 1;
+        end else begin
+            for (trial = 0; trial < TRIALS; trial = trial + 1) begin
+                // The requests span every hClk phase and many CPU microstates.
+                repeat (1 + ((trial * 37) % 91)) tick();
+                #0.3;
+                requested_phases[cartridge.counter] = 1;
+                if (tstate <= 4) requested_tstates[tstate] = 1;
+                if (cart_read) request_during_read = request_during_read + 1;
+                pause_machine(); capture_machine();
+                continue_machine(0);
+                continuation_counter = counter;
+                if (counter == saved_counter) $fatal(1, "Reference failed to execute counter program");
+                // Advance past the reference and stop at a different physical
+                // phase. Reloading the CPU alone must not pass this comparison.
+                repeat (67 + ((trial * 19) % 101)) tick();
+                pause_machine(); restore_machine();
+                continue_machine(1);
+                if (counter !== continuation_counter)
+                    $fatal(1, "Counter continuation differs speed=%0d", SPEED);
+            end
+            if (compared != TRIALS * TRACE_LENGTH || !fetches || !request_during_read ||
+                $countones(requested_phases) < 4 || $countones(requested_tstates) < 3)
+                $fatal(1, "Insufficient phase coverage speed=%0d phases=%h T=%b reads=%0d", SPEED, requested_phases, requested_tstates, request_during_read);
+            $display("PASS real GBse/cart snapshot speed=%0d: %0d restores, %0d exact enable traces, request phases=%h Tstates=%b, %0d instruction reads", SPEED, TRIALS, compared, requested_phases, requested_tstates, fetches);
+            passed = 1;
         end
-        if (compared != TRIALS * TRACE_LENGTH || !fetches || !request_during_read ||
-            $countones(requested_phases) < 4 || $countones(requested_tstates) < 3)
-            $fatal(1, "Insufficient phase coverage speed=%0d phases=%h T=%b reads=%0d", SPEED, requested_phases, requested_tstates, request_during_read);
-        $display("PASS real GBse/cart snapshot speed=%0d: %0d restores, %0d exact enable traces, request phases=%h Tstates=%b, %0d instruction reads", SPEED, TRIALS, compared, requested_phases, requested_tstates, fetches);
-        passed = 1;
     end
 endmodule
 
-module snapshot_cart_cpu_tb;
+module snapshot_cart_cpu_tb #(parameter AUTO_CAPTURE = 0);
     wire slow, fast;
-    snapshot_cart_cpu_case #(0) single_speed(slow);
-    snapshot_cart_cpu_case #(1) double_speed(fast);
+    snapshot_cart_cpu_case #(0, AUTO_CAPTURE) single_speed(slow);
+    snapshot_cart_cpu_case #(1, AUTO_CAPTURE) double_speed(fast);
     initial begin wait (slow && fast); $finish; end
     initial begin #20000000; $fatal(1, "Real CPU/cart snapshot test timeout"); end
 endmodule

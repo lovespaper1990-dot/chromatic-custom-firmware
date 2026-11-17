@@ -8,6 +8,8 @@ module snapshot_tb #(parameter RAM_CODE = 0);
     always #2 xclk=~xclk;
     wire [14:0] address;
     wire rd_n, complete, supported;
+    wire diagnostics_off_passed;
+    snapshot_diagnostics_off_case check_diagnostics_off(hclk, diagnostics_off_passed);
     wire [63:0] identity;
     reg wrong_mapper=0;
     reg [7:0] rom_byte;
@@ -19,6 +21,8 @@ module snapshot_tb #(parameter RAM_CODE = 0);
     end
     snapshot_cart cart(hclk,ready,rom_byte,address,rd_n,complete,supported,identity);
     reg core_loaded=0;
+    reg [15:0] debug_flags=0;
+    reg [63:0] expected_debug;
     wire core_abort, restart_core, active;
     reg command_toggle=0, busy=0, core_req=0, core_read=0;
     reg [6:0] cmd;
@@ -33,9 +37,9 @@ module snapshot_tb #(parameter RAM_CODE = 0);
     // remains disabled until bank switching and SRAM are wired and tested.
     wire [63:0] mailbox_id = RAM_CODE == 0 ? identity :
                              {16'h1b03, RAM_CODE[7:0], identity[39:0]};
-    snapshot_control #(.STALL_BITS(9)) ctl(hclk,reset,supported,mailbox_id,command_toggle,cmd,payload,
+    snapshot_control #(.STALL_BITS(9), .DIAGNOSTICS(1)) ctl(hclk,reset,supported,mailbox_id,command_toggle,cmd,payload,
         reply_toggle,reply,capture,restore,busy,core_req,core_read,core_addr,
-        core_out,core_done,req_toggle,index,read_word,word_out,ack,word_in,core_loaded,core_abort,restart_core,active);
+        core_out,core_done,req_toggle,index,read_word,word_out,ack,word_in,core_loaded,core_abort,restart_core,active,debug_flags);
     reg memory_reset=0;
     wire ram_req, ram_read;
     wire [22:0] ram_addr;
@@ -100,6 +104,7 @@ module snapshot_tb #(parameter RAM_CODE = 0);
     initial begin
         repeat(4) @(negedge hclk); reset=0;
         control(1,2);
+        command('h20,4,{16'hfff2,64'd0});
         ready=1; wait(complete); @(negedge hclk);
         if(identity !== 64'h0000007ddd608109 || !supported) $fatal(1,"identity %h",identity);
         command('h20,3,{16'hfff1,mailbox_id});
@@ -145,15 +150,47 @@ module snapshot_tb #(parameter RAM_CODE = 0);
         control(2,1); @(negedge hclk); busy=1;
         repeat (3) @(negedge hclk); busy=0;
         control(0,3); control(2,4);
-        // Failure before the commit header must not publish the PSRAM image.
+        // Freeze diagnostic flags at an incomplete capture, while retaining
+        // the existing zero-padded status reply. A prior real capture must not
+        // leave req_seen set in this new operation.
+        debug_flags=16'h0001;
         control(1,1); @(negedge hclk); busy=1;
-        repeat (3) @(negedge hclk); busy=0;
+        repeat (3) @(negedge hclk); debug_flags=16'h0002;
+        repeat (3) @(negedge hclk);
+        expected_debug={16'h0002,16'h0003,index,2'd1,3'd0,
+            1'b1,1'b0,1'b0,1'b0,1'b0,1'b0,core_read,core_loaded,
+            req_toggle,ack,3'b000};
+        busy=0;
         control(0,3); control(2,4);
+        debug_flags=16'h8000;
+        command('h20,4,{16'hfff2,expected_debug});
         // Core never reaches VBlank/settle: watchdog releases the engine.
         control(1,1); @(negedge hclk); busy=1;
         wait(core_abort); if(restart_core) $fatal(1,"failed capture rebooted core");
         @(negedge hclk); busy=0;
         control(0,3); control(2,4);
+        // Stall a PSRAM request so diagnostics distinguish a core that never
+        // requested memory from an unacknowledged physical-memory transfer.
+        debug_flags=16'h0010; initialized=0;
+        control(1,1); @(negedge hclk); busy=1;
+        command('h20,4,{16'hfff2,64'd0});
+        @(negedge hclk); core_addr=26'h3800000+17*2; core_out=pattern(17);
+        core_read=0; core_req=1;
+        @(negedge hclk); core_req=0;
+        wait(ctl.owner==1); @(negedge hclk); debug_flags=16'h0020;
+        repeat (3) @(negedge hclk); debug_flags=16'h0040;
+        expected_debug={16'h0040,16'h0070,14'd17,2'd1,3'd1,
+            1'b1,1'b1,1'b1,1'b0,1'b1,1'b0,1'b0,1'b0,
+            req_toggle,ack,3'b000};
+        wait(core_abort);
+        if(restart_core) $fatal(1,"capture memory timeout rebooted core");
+        @(negedge hclk); busy=0; debug_flags=16'h8000;
+        command('h20,4,{16'hfff2,expected_debug});
+        initialized=1;
+        wait(ctl.owner==0); repeat(3) @(negedge hclk);
+        control(0,3);
+        command('h20,4,{16'hfff2,expected_debug});
+        debug_flags=0;
         // During an interrupted load the processor must cold boot rather than
         // resume a partially restored register file or memory image.
         control(1,1); @(negedge hclk); busy=1;
@@ -167,8 +204,52 @@ module snapshot_tb #(parameter RAM_CODE = 0);
         ready=0; repeat (5) @(negedge hclk); wrong_mapper=1; ready=1; wait(complete); @(negedge hclk);
         if(supported) $fatal(1,"mapper was accepted");
         control(2,2);
+        if (!diagnostics_off_passed) $fatal(1,"default-off diagnostics case did not complete");
         $display("PASS: %0d capture/read/upload/restore words, partial upload and wrong mapper", WORDS);
         $finish;
     end
     initial begin #20000000; $fatal(1,"timeout"); end
+endmodule
+
+// Production's default parameter must remove storage without changing op4's
+// response framing. Exercise a real capture timeout with every flag set.
+module snapshot_diagnostics_off_case(input clk, output reg passed = 0);
+    reg reset = 1, command_toggle = 0;
+    reg [79:0] command_data = 0;
+    wire reply_toggle, active;
+    wire [79:0] reply;
+    snapshot_control #(.STALL_BITS(4)) ctl(
+        .clk(clk), .reset(reset), .supported(1'b1), .identity(64'd0),
+        .cmd_toggle(command_toggle), .cmd(7'h20), .cmd_data(command_data),
+        .reply_toggle(reply_toggle), .reply(reply), .active(active),
+        .core_busy(1'b0), .core_req(1'b0), .core_read(1'b0),
+        .core_addr(26'd0), .core_out(64'd0), .core_loaded(1'b0),
+        .mem_ack(1'b0), .mem_in(64'd0), .debug_flags(16'hffff)
+    );
+    task command(input [7:0] operation, input [79:0] expected);
+        reg previous_reply;
+        begin
+            @(negedge clk);
+            previous_reply = reply_toggle;
+            command_data = operation;
+            command_toggle = ~command_toggle;
+            wait (reply_toggle != previous_reply);
+            @(negedge clk);
+            if (reply !== expected)
+                $fatal(1,"default-off diagnostics response %h, expected %h",reply,expected);
+        end
+    endtask
+    initial begin
+        repeat (4) @(negedge clk); reset = 0;
+        command(1, {16'hfff0,8'd1,8'd1,48'd0});
+        repeat (30) @(negedge clk);
+        if (active) $fatal(1,"default-off capture watchdog did not finish");
+        command(4, {16'hfff2,64'd0});
+        $display("PASS diagnostics default-off: timeout and nonzero flags return fff2/zero");
+        passed = 1;
+    end
+    initial begin
+        repeat (1000) @(posedge clk);
+        if (!passed) $fatal(1,"default-off diagnostics timeout");
+    end
 endmodule

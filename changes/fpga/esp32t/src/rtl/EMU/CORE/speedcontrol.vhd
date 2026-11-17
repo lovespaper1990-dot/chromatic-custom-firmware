@@ -12,7 +12,8 @@ entity speedcontrol is
       DMA_on      : in     std_logic;
       ce          : out    std_logic := '0';
       ce_2x       : buffer std_logic := '0';
-      standby_req : in     std_logic := '0';
+      -- Keep the cross-language input explicit (no VHDL port default).
+      standby_req : in     std_logic;
       cart_frozen : out    std_logic := '0';
       refresh     : out    std_logic := '0';
       ff_on       : out    std_logic := '0'

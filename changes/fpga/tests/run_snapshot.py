@@ -58,6 +58,11 @@ with tempfile.TemporaryDirectory() as temp:
             params = [f"-Psnapshot_tb.RAM_CODE={ram_code}"] if ram_code else []
             run(ivl + params + ["-s", name, "-o", "model", tests / (name + ".sv"), *sources], temp, True)
             run(vvp + ["model"], temp)
+    # ROM-only terminal CRC drains without starting another physical read.
+    run(ivl + ["-Psnapshot_cart_mbc5_tb.ROM_ONLY=1", "-s", "snapshot_cart_mbc5_tb",
+               "-o", "rom_only", tests / "snapshot_cart_mbc5_tb.sv",
+               rtl / "EMU/snapshot_cart.v"], temp, True)
+    run(vvp + ["rom_only"], temp)
     if os.environ.get("SNAPSHOT_FULL_ROM") == "1":
         run(ivl + ["-Psnapshot_cart_mbc5_tb.ROM_CODE=8", "-s", "snapshot_cart_mbc5_tb",
                    "-o", "full_rom", tests / "snapshot_cart_mbc5_tb.sv",
@@ -70,10 +75,14 @@ with tempfile.TemporaryDirectory() as temp:
                tests / "snapshot_hotplug_tb.sv", project / "src/top.v",
                rtl / "EMU/snapshot_cart.v"], temp, True)
     run(vvp + ["hotplug"], temp)
+    run(ivl + ["-i", "-s", "esp32_sd_strap_tb", "-o", "strap",
+               tests / "esp32_sd_strap_tb.sv", project / "src/top.v"], temp, True)
+    run(vvp + ["strap"], temp)
 
     for source in [tests / "snapshot_psram_model.vhd", rtl / "BSP/MultiPortRamCtrl.vhd",
                    tests / "snapshot_arbiter_tb.vhd", rtl / "EMU/CORE/bus_savestates.vhd",
                    rtl / "EMU/CORE/gb_savestates.vhd", rtl / "EMU/CORE/speedcontrol.vhd",
+                   project / "src/Gameboy_MiSTer/rtl/gb_statemanager.vhd",
                    tests / "savestate_engine_tb.vhd"]:
         # GHDL stores paths in a VHDL work index; use ASCII source basenames.
         shutil.copyfile(source, Path(temp) / source.name)
@@ -92,17 +101,28 @@ with tempfile.TemporaryDirectory() as temp:
             subprocess.run([ghdl, "--synth", "--std=08", "--out=verilog", unit],
                            cwd=temp, stdout=netlist, check=True)
         palette_sources.append(translated)
+    # Match the request manager generics in gb.v. Keep its translated module
+    # available for both direct-engine and complete request-manager tests.
+    manager = Path(temp) / "gb_statemanager.v"
+    with manager.open("w") as netlist:
+        subprocess.run([ghdl, "--synth", "--std=08", "--out=verilog",
+                        "-gSoftmap_SaveState_ADDR=58720256",
+                        "-gSoftmap_Rewind_ADDR=33554432", "gb_statemanager"],
+                       cwd=temp, stdout=netlist, check=True)
     # Joint save/load with the real state sequencer, physical MBC5 RAM bridge,
-    # mailbox and independently clocked variable-latency backing memory.
-    for ram_code in (2, 3):
-        run(ivl + [f"-Psnapshot_mbc5_system_tb.RAM_CODE={ram_code}",
-                   "-s", "snapshot_mbc5_system_tb", "-o", "mbc5_system",
-                   tests / "snapshot_mbc5_system_tb.sv",
-                   Path(temp) / "gb_savestates.v", Path(temp) / "speedcontrol.v",
-                   *[rtl / "EMU" / filename for filename in
-                     ("snapshot_mbc5.v", "snapshot_mbc5_bus.v", "snapshot_mbc5_mapper.v",
-                      "snapshot_control.v")]], temp, True)
-        run(vvp + ["mbc5_system"], temp)
+    # mailbox and independently clocked variable-latency backing memory. The
+    # manager variants also exercise edge buffering and the board slot base.
+    for use_manager in (0, 1):
+        for ram_code in (2, 3):
+            run(ivl + [f"-Psnapshot_mbc5_system_tb.RAM_CODE={ram_code}",
+                       f"-Psnapshot_mbc5_system_tb.USE_MANAGER={use_manager}",
+                       "-s", "snapshot_mbc5_system_tb", "-o", "mbc5_system",
+                       tests / "snapshot_mbc5_system_tb.sv",
+                       Path(temp) / "gb_savestates.v", Path(temp) / "speedcontrol.v", manager,
+                       *[rtl / "EMU" / filename for filename in
+                         ("snapshot_mbc5.v", "snapshot_mbc5_bus.v", "snapshot_mbc5_mapper.v",
+                          "snapshot_control.v")]], temp, True)
+            run(vvp + ["mbc5_system"], temp)
     # The USB top contains vendor syntax outside the Icarus subset. Retain
     # its actual pin declaration to check the board's standby wiring.
     usb_ports = re.search(r"^module usbuvcuart_top\b.*?^\);", usb_source, re.M | re.S)
@@ -125,7 +145,13 @@ with tempfile.TemporaryDirectory() as temp:
                Path(temp) / "speedcontrol.v"], temp, True)
     run(vvp + ["cart_snapshot"], temp)
 
-    palette_sources.extend(rtl / "EMU/CORE" / name for name in ("video.v", "sprites.v", "dpramV.v"))
+    # Check all ten-bit register addresses against the previous masked-OR
+    # read path before exercising the complete palette capture/restore flow.
+    video_sources = [rtl / "EMU/CORE" / name for name in ("video.v", "sprites.v", "dpramV.v")]
+    run(ivl + ["-s", "snapshot_palette_readback_tb", "-o", "palette_readback",
+               tests / "snapshot_palette_readback_tb.sv", *video_sources], temp, True)
+    run(vvp + ["palette_readback"], temp)
+    palette_sources.extend(video_sources)
     run(ivl + ["-s", "snapshot_palette_tb", "-o", "palette", *palette_sources], temp, True)
     run(vvp + ["palette"], temp)
     run(ivl + ["-s", "standby_dma_tb", "-o", "standby_dma", tests / "standby_dma_tb.sv",
@@ -170,10 +196,13 @@ with tempfile.TemporaryDirectory() as temp:
     with translated_cpu.open("w") as netlist:
         subprocess.run([ghdl, "--synth", "--std=08", "-fsynopsys", "--out=verilog", "gbse"],
                        cwd=vhdl_work, stdout=netlist, check=True)
-    run(ivl + ["-s", "snapshot_cart_cpu_tb", "-o", "cart_cpu",
-               tests / "snapshot_cart_cpu_tb.sv", translated_cpu,
-               rtl / "EMU/cart.v", Path(temp) / "speedcontrol.v"], temp, True)
-    run(vvp + ["cart_cpu"], temp)
+    for auto_capture in (0, 1):
+        run(ivl + [f"-Psnapshot_cart_cpu_tb.AUTO_CAPTURE={auto_capture}",
+                   "-s", "snapshot_cart_cpu_tb", "-o", "cart_cpu",
+                   tests / "snapshot_cart_cpu_tb.sv", translated_cpu,
+                   rtl / "EMU/cart.v", Path(temp) / "speedcontrol.v",
+                   Path(temp) / "gb_savestates.v", manager], temp, True)
+        run(vvp + ["cart_cpu"], temp)
     run(ivl + ["-s", "snapshot_cart_sleep_cpu_tb", "-o", "cart_sleep_cpu",
                tests / "snapshot_cart_sleep_cpu_tb.sv", translated_cpu,
                rtl / "EMU/cart.v", Path(temp) / "speedcontrol.v"], temp, True)

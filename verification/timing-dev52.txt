@@ -1,0 +1,11 @@
+Chromatic 4.6-dev5.2 final timing
+Paths: 57482
+Setup violated endpoints: 0
+Hold violated endpoints: 0
+Worst setup: +0.729 ns
+Worst hold: +0.127 ns
+Worst recovery: +0.727 ns
+Worst removal: +0.171 ns
+Worst pulse width: +1.958 ns
+Map2 / Place1 / Route0 / maxfan60
+Original clock frequencies and SDC retained.

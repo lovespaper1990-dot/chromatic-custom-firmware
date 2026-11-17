@@ -384,7 +384,10 @@ module emu_system_top
         .core_req(bridge_req), .core_read(bridge_read), .core_addr(bridge_addr),
         .core_out(bridge_out), .core_done(bridge_done), .mem_toggle(snap_request),
         .mem_index(snap_index), .mem_read(snap_read), .mem_out(snap_out),
-        .mem_ack(snap_ack), .mem_in(snap_in)
+        .mem_ack(snap_ack), .mem_in(snap_in),
+        .debug_flags({ss_save, ss_load, ss_active, ss_busy, SAVE_out_ena,
+                      sleep_savestate, cart_frozen, ce, ce_2x, rd, wr, DMA_on,
+                      game_cart_wr, game_cart_input_dir, standby, boot_rom_enabled})
     );
 
 

@@ -125,7 +125,8 @@ entity T80 is
 		IntCycle_n      : out std_logic;
 		IntE            : out std_logic;
 		Stop            : out 	 std_logic;
-		isGBC           : in  std_logic := '0'; -- Gameboy Color
+		-- Explicitly connected by GBse; a default can be misbound by Gowin.
+		isGBC           : in  std_logic; -- Gameboy Color
 		-- savestates              
 		SaveStateBus_Din  : in  std_logic_vector(BUS_buswidth-1 downto 0);
 		SaveStateBus_Adr  : in  std_logic_vector(BUS_busadr-1 downto 0);

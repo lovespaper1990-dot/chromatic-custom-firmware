@@ -51,6 +51,9 @@ module snapshot_hotplug_tb;
          if (board.scan_complete || board.scan_address!==0 || board.scan_ready || valid)
             $fatal(1,"scanner did not forget old cartridge");
          tickcheck(2'b11);
+         if (board.scan_ready || board.scan_complete || valid)
+            $fatal(1,"probe enabled before registered ready stage");
+         tickcheck(2'b11);
          if (!board.scan_ready || board.scan_complete || valid)
             $fatal(1,"early assertion after synchronizer release");
       end

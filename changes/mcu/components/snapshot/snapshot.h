@@ -8,3 +8,4 @@ bool Snapshot_Busy(void);
 unsigned Snapshot_Percent(void);
 const char *Snapshot_Status(void);
 void Snapshot_OnReply(const uint8_t payload[10]);
+void Snapshot_PrintDiagnostics(void);

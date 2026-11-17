@@ -49,7 +49,7 @@ module top #(
     output              POWER_DOWN_IO,
 //    input               VBUS_DET,  // unused pin
 
-    output reg          ESP32_IO0,
+    output              ESP32_IO0,
 
     output              I2S_BCLK,       // D16 IO33
     input               I2S_WS,         // D15 IO25 CC
@@ -583,7 +583,14 @@ module top #(
         cart_reset_n_sync <= {cart_reset_n_sync[0], latched_cart_rst_n};
         snapshot_ram_ready_sync <= {snapshot_ram_ready_sync[0], BIST_finished && !BIST_failed};
     end
-    wire scan_ready = cartridge_ready && cart_present_sync[1] && cart_reset_n_sync[1] && scan_run_sync[1];
+    // Keep the power-state decode off the cartridge strobes. Assert reset
+    // asynchronously as before, then enable the probe only on an hClk edge.
+    reg scan_ready = 0;
+    always @(posedge hClk or posedge memrst) begin
+        if (memrst) scan_ready <= 0;
+        else scan_ready <= cartridge_ready && cart_present_sync[1] &&
+                           cart_reset_n_sync[1] && scan_run_sync[1];
+    end
     snapshot_cart u_snapshot_cart (
         .clk(hClk), .ready(scan_ready), .data(core_cart_d_in),
         .address(scan_address), .read_n(scan_read_n), .complete(scan_complete),
@@ -720,11 +727,24 @@ module top #(
 
     reg ESP32_EN_INT = 1;
     reg ESP32_IO0_INT = 1;
+    reg ESP32_IO0_Q = 1;
+    reg [7:0] ESP32_IO0_STRAP_HOLD = 0;
+    wire ESP32_IO0_STRAP_WINDOW = ~&ESP32_IO0_STRAP_HOLD;
+    // Drive a definite boot strap through reset and for about 125 ms after
+    // EN rises, then release the line for the board's SD data path. A host
+    // download request always retains priority over the normal release.
+    // Related hardware diagnosis: ChroMagic PR #16.
+    assign ESP32_IO0 = !ESP32_IO0_Q ? 1'b0 :
+                      ESP32_IO0_STRAP_WINDOW ? 1'b1 : 1'bz;
 
     // 8MHz clock
     always@(posedge gClk) begin
 
-        ESP32_IO0 <= ESP32_IO0_INT;
+        ESP32_IO0_Q <= ESP32_IO0_INT;
+
+        if (!ESP32_EN) ESP32_IO0_STRAP_HOLD <= 0;
+        else if (ESP_BOOT_DELAY_COUNTER == 0 && ESP32_IO0_STRAP_WINDOW)
+            ESP32_IO0_STRAP_HOLD <= ESP32_IO0_STRAP_HOLD + 1'b1;
 
         ESP_BOOT_DELAY_COUNTER <= ESP_BOOT_DELAY_COUNTER + 1'b1;
 

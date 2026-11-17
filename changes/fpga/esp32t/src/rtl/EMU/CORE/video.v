@@ -85,8 +85,7 @@ module video (
 );
 
 // savestates
-localparam SAVESTATE_MODULES    = 19;
-wire [63:0] SaveStateBus_wired_or[0:SAVESTATE_MODULES-1];
+wire [63:0] unused_state_readback[0:2];
 
 wire [60:0] SS_Video1;
 wire [60:0] SS_Video1_BACK;
@@ -95,9 +94,9 @@ wire [63:0] SS_Video2_BACK;
 wire [63:0] SS_Video3;
 wire [63:0] SS_Video3_BACK;
 
-eReg_SavestateV #(0,  9, 60, 0, 64'h0000000000000000) iREG_SAVESTATE_Video1 (clk, SaveStateBus_Din, SaveStateBus_Adr, SaveStateBus_wren, SaveStateBus_rst, SaveStateBus_wired_or[ 0], SS_Video1_BACK, SS_Video1);  
-eReg_SavestateV #(0, 10, 63, 0, 64'h00000000FFFFFC00) iREG_SAVESTATE_Video2 (clk, SaveStateBus_Din, SaveStateBus_Adr, SaveStateBus_wren, SaveStateBus_rst, SaveStateBus_wired_or[ 1], SS_Video2_BACK, SS_Video2);  
-eReg_SavestateV #(0, 27, 63, 0, 64'h0000000000000000) iREG_SAVESTATE_Video3 (clk, SaveStateBus_Din, SaveStateBus_Adr, SaveStateBus_wren, SaveStateBus_rst, SaveStateBus_wired_or[18], SS_Video3_BACK, SS_Video3);  
+eReg_SavestateV #(0,  9, 60, 0, 64'h0000000000000000) iREG_SAVESTATE_Video1 (clk, SaveStateBus_Din, SaveStateBus_Adr, SaveStateBus_wren, SaveStateBus_rst, unused_state_readback[0], SS_Video1_BACK, SS_Video1);  
+eReg_SavestateV #(0, 10, 63, 0, 64'h00000000FFFFFC00) iREG_SAVESTATE_Video2 (clk, SaveStateBus_Din, SaveStateBus_Adr, SaveStateBus_wren, SaveStateBus_rst, unused_state_readback[1], SS_Video2_BACK, SS_Video2);  
+eReg_SavestateV #(0, 27, 63, 0, 64'h0000000000000000) iREG_SAVESTATE_Video3 (clk, SaveStateBus_Din, SaveStateBus_Adr, SaveStateBus_wren, SaveStateBus_rst, unused_state_readback[2], SS_Video3_BACK, SS_Video3);  
 
 wire [63:0] SS_BPAL_BACK [7:0];
 wire [63:0] SS_OPAL_BACK [7:0];
@@ -128,16 +127,24 @@ always @(posedge clk) begin
         if (palette_row == 9) telemetry_obj <= SaveStateBus_Din[47:16];
     end
 end
+// One binary palette selection replaces sixteen decoded 64-bit masks.
+// Register capture remains combinational and restore/write staging is unchanged.
+wire [63:0] snapshot_palette_rows[0:15];
 genvar ss_palette;
 generate for(ss_palette=0;ss_palette<8;ss_palette=ss_palette+1) begin: save_palette
-  assign SaveStateBus_wired_or[2+ss_palette] = SaveStateBus_Adr == 11+ss_palette ? SS_BPAL_BACK[ss_palette] : 0;
-  assign SaveStateBus_wired_or[10+ss_palette] = SaveStateBus_Adr == 19+ss_palette ? SS_OPAL_BACK[ss_palette] : 0;
+  assign snapshot_palette_rows[ss_palette] = SS_BPAL_BACK[ss_palette];
+  assign snapshot_palette_rows[8+ss_palette] = SS_OPAL_BACK[ss_palette];
 end endgenerate
-assign SaveStateBus_Dout  = SaveStateBus_wired_or[ 0] | SaveStateBus_wired_or[ 1] | SaveStateBus_wired_or[ 2] | SaveStateBus_wired_or[ 3] | 
-							SaveStateBus_wired_or[ 4] | SaveStateBus_wired_or[ 5] | SaveStateBus_wired_or[ 6] | SaveStateBus_wired_or[ 7] | 
-							SaveStateBus_wired_or[ 8] | SaveStateBus_wired_or[ 9] | SaveStateBus_wired_or[10] | SaveStateBus_wired_or[11] |
-							SaveStateBus_wired_or[12] | SaveStateBus_wired_or[13] | SaveStateBus_wired_or[14] | SaveStateBus_wired_or[15] | 
-							SaveStateBus_wired_or[16] | SaveStateBus_wired_or[17] | SaveStateBus_wired_or[18];
+reg [63:0] snapshot_readback;
+always @* begin
+  case (SaveStateBus_Adr)
+    10'd9: snapshot_readback = {3'd0, SS_Video1_BACK};
+    10'd10: snapshot_readback = SS_Video2_BACK;
+    10'd27: snapshot_readback = SS_Video3_BACK;
+    default: snapshot_readback = palette_addr ? snapshot_palette_rows[palette_row] : 64'd0;
+  endcase
+end
+assign SaveStateBus_Dout = snapshot_readback;
 
 
 wire [7:0] oam_do;

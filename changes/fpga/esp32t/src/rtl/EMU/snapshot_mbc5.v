@@ -6,7 +6,7 @@ module snapshot_mbc5 (
     input active, input abort, input restart_core,
     input core_req, input core_read, input [25:0] core_addr,
     input [63:0] core_out, output reg core_done = 0,
-    output reg [63:0] core_in = 0,
+    output [63:0] core_in,
     output reg mem_req = 0, output reg mem_read,
     output reg [25:0] mem_addr, output reg [63:0] mem_out,
     input mem_done, input [63:0] mem_in,
@@ -24,7 +24,8 @@ module snapshot_mbc5 (
     reg [1:0] finish_mode = COMMIT, restore_step = 0;
     reg [13:0] word_index;
     reg [2:0] lane = 0;
-    reg [63:0] word_data;
+    reg [63:0] word_data = 0;
+    assign core_in = word_data;
     reg [15:0] original_mapper = 1, loaded_mapper = 1, restore_mapper;
     reg session = 0, session_loading = 0, aborting = 0, mem_pending = 0;
     wire has_ram = ram_code == 2 || ram_code == 3;
@@ -39,9 +40,14 @@ module snapshot_mbc5 (
     reg [7:0] bus_out;
     wire bus_busy, bus_done;
     wire [7:0] bus_in;
+    // Physical power isolation and the scanner mux protect the connector on
+    // reset. Register this local gate to keep the power-state decode out of
+    // the active cartridge strobes; ownership still resets on the same edge.
+    reg bus_ready = 0;
+    always @(posedge clk) bus_ready <= !reset;
 
     snapshot_mbc5_bus bus (
-        .clk(clk), .ready(!reset), .start(bus_start), .write_byte(bus_write),
+        .clk(clk), .ready(bus_ready), .start(bus_start), .write_byte(bus_write),
         .address(bus_addr), .data_out(bus_out), .cart_in(cart_in),
         .busy(bus_busy), .done(bus_done), .data_in(bus_in),
         .cart_addr(cart_addr), .cart_out(cart_out), .read_n(cart_read_n),
@@ -114,11 +120,10 @@ module snapshot_mbc5 (
                 end
             end
             MEM_WAIT: if (mem_done) begin
-                core_in <= mem_in;
+                word_data <= mem_in;
                 if (enabled && mem_read && word_index == 33)
                     loaded_mapper <= mem_in[15:0];
                 if (enabled && mem_read && has_ram && word_index >= 6245) begin
-                    word_data <= mem_in;
                     take_bus <= 1;
                     lane <= 0;
                     state <= ENABLE_RAM;

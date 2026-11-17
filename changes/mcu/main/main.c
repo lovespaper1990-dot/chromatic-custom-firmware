@@ -104,6 +104,17 @@ static int report_audio(int argc, char **argv)
     return 0;
 }
 
+static int report_snapshot(int argc, char **argv)
+{
+    if (argc == 2 && !strcmp(argv[1], "save")) Snapshot_Start(false);
+    else if (argc != 1) {
+        printf("Usage: snapshot [save]\n");
+        return 1;
+    }
+    Snapshot_PrintDiagnostics();
+    return 0;
+}
+
 // Poll on the same bus as the PCM data. Older FPGA builds leave MISO
 // undriven for this command; only accept a framed and complemented reply.
 static void read_headphone_wheel(void)
@@ -435,6 +446,8 @@ void app_main(void)
     esp_console_register_help_command();
     const esp_console_cmd_t audio_command = {.command = "btaudio", .help = "Read headset and PCM status", .func = report_audio};
     ESP_ERROR_CHECK(esp_console_cmd_register(&audio_command));
+    const esp_console_cmd_t snapshot_command = {.command = "snapshot", .help = "Read snapshot diagnostics, or save a test snapshot", .func = report_snapshot};
+    ESP_ERROR_CHECK(esp_console_cmd_register(&snapshot_command));
     // All commands must be registered prior to starting the REPL
     ESP_ERROR_CHECK(esp_console_start_repl(pRepl));
 

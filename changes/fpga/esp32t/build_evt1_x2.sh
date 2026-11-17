@@ -11,6 +11,7 @@ if [ "$(uname -s)" = Darwin ]; then
     # Start placement in a clean directory with a short ASCII path. On macOS
     # the .04-1 router can trap while allocating the GW5A device model.
     GOWIN_BUILD_STEP=syn "$gw_sh" build.tcl
+    python3 ../tests/check_snapshot_netlist.py impl/gwsynthesis/evt1_x2.vg
     attempt=1
     while :; do
         stage_dir=$(mktemp -d /private/tmp/chromatic-route-XXXXXX)
@@ -38,7 +39,9 @@ if [ "$(uname -s)" = Darwin ]; then
         attempt=$((attempt + 1))
     done
 else
-    "$gw_sh" build.tcl
+    GOWIN_BUILD_STEP=syn "$gw_sh" build.tcl
+    python3 ../tests/check_snapshot_netlist.py impl/gwsynthesis/evt1_x2.vg
+    GOWIN_BUILD_STEP=pnr "$gw_sh" build.tcl
 fi
 mkdir -p build
 cp -f impl/pnr/evt1_x2.fs build/evt1_x2.fs

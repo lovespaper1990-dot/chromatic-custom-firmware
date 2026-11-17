@@ -3,7 +3,9 @@
 // The real translated VHDL state sequencer drives the real mailbox and MBC5
 // bridge. Game RAM uses synchronous byte ports; the backing store and physical
 // cartridge are independent models. No game ROM or commercial save is needed.
-module snapshot_mbc5_system_tb #(parameter RAM_CODE = 3);
+// USE_MANAGER=1 also exercises the board's actual edge-buffered request manager
+// and its 0x3800000 state address. USE_MANAGER=0 retains direct engine coverage.
+module snapshot_mbc5_system_tb #(parameter RAM_CODE = 3, parameter USE_MANAGER = 0);
     localparam RAM_BYTES = RAM_CODE == 3 ? 32768 : 8192;
     localparam WORDS = RAM_CODE == 3 ? 10341 : 7269;
     localparam [63:0] IDENTITY = {16'h1b03, RAM_CODE[7:0], 40'h7d12345678};
@@ -34,10 +36,44 @@ module snapshot_mbc5_system_tb #(parameter RAM_CODE = 3);
     wire [63:0] reg_readback = bus_addr == 32 ? 64'd0 : live_regs[bus_addr[5:0]];
     reg [7:0] wram [0:32767], vram [0:16383], oam [0:159], zram [0:127];
     reg [7:0] wram_q = 0, vram_q = 0, oam_q = 0, zram_q = 0;
+    wire engine_save, engine_load;
+    wire [31:0] engine_address;
+    localparam [31:0] SLOT_BASE = USE_MANAGER ? 32'h03800000 : 32'd0;
+    integer manager_saves = 0, manager_loads = 0;
+    generate
+        if (USE_MANAGER) begin : through_manager
+            wire manager_save, manager_load;
+            // Translate the maintained VHDL with generics
+            // Softmap_SaveState_ADDR=58720256, Softmap_Rewind_ADDR=33554432,
+            // exactly as instantiated by the real gb.v.
+            gb_statemanager manager(
+                .clk(clk), .reset(reset), .rewind_on(1'b0), .rewind_active(1'b0),
+                .savestate_number(32'd0), .save(capture), .load(restore),
+                .sleep_rewind(), .vsync(1'b1), .request_savestate(manager_save),
+                .request_loadstate(manager_load), .request_address(engine_address),
+                .request_busy(busy)
+            );
+            assign engine_save = manager_save && active;
+            assign engine_load = manager_load && active;
+            always @(posedge clk) if (!reset) begin
+                if (manager_save) manager_saves <= manager_saves + 1;
+                if (manager_load) manager_loads <= manager_loads + 1;
+                if ((manager_save || manager_load) && engine_address !== SLOT_BASE)
+                    $fatal(1, "Manager selected wrong board snapshot address");
+            end
+        end else begin : direct_engine
+            assign engine_save = capture;
+            assign engine_load = restore;
+            assign engine_address = SLOT_BASE;
+        end
+    endgenerate
+    always @(posedge clk) if (raw_req &&
+            (raw_addr < SLOT_BASE || raw_addr >= SLOT_BASE + WORDS*2 || raw_addr[0]))
+        $fatal(1, "State engine emitted address outside selected slot");
     gb_savestates engine(
         .clk(clk), .reset_in(reset), .abort_state(abort_state), .reset_out(engine_reset),
-        .load_done(loaded), .increaseSSHeaderCount(1'b0), .save(capture), .load(restore),
-        .savestate_address(32'd0), .savestate_busy(busy), .cart_ram_size(RAM_CODE[7:0]),
+        .load_done(loaded), .increaseSSHeaderCount(1'b0), .save(engine_save), .load(engine_load),
+        .savestate_address(engine_address), .savestate_busy(busy), .cart_ram_size(RAM_CODE[7:0]),
         .lcd_vsync(1'b1), .BUS_Din(bus_data), .BUS_Adr(bus_addr), .BUS_wren(bus_write),
         .BUS_rst(bus_reset), .BUS_Dout(reg_readback), .sleep_savestate(sleeping),
         .clock_ena_in(ce2), .Save_RAMAddr(ram_addr), .Save_RAMWrEn(ram_write),
@@ -133,7 +169,7 @@ module snapshot_mbc5_system_tb #(parameter RAM_CODE = 3);
         .core_out(mem_out), .core_done(mem_done), .mem_toggle(backing_toggle),
         .mem_index(backing_index), .mem_read(backing_read), .mem_out(backing_out),
         .mem_ack(backing_ack), .mem_in(backing_in), .core_loaded(loaded),
-        .core_abort(abort_state), .restart_core(restart), .active(active)
+        .core_abort(abort_state), .restart_core(restart), .active(active), .debug_flags(16'd0)
     );
 
     // A separate clock and request-dependent latency catch assumptions that
@@ -294,7 +330,9 @@ module snapshot_mbc5_system_tb #(parameter RAM_CODE = 3);
         check_game();
         if (checked_abort_resumes != 1 || cart_writes != RAM_BYTES)
             $fatal(1, "Cancelled capture resumed unsafely or wrote cartridge RAM");
-        $display("PASS: joint real state engine + MBC5 + mailbox, %0d-byte physical RAM, all core memories and mapper before first CPU enable, safe capture abort (%0d backing requests)", RAM_BYTES, backing_requests);
+        if (USE_MANAGER && (manager_saves != 2 || manager_loads != 1))
+            $fatal(1, "Manager did not emit exactly two captures and one restore");
+        $display("PASS: joint real state engine + MBC5 + mailbox, %0d-byte physical RAM, all core memories and mapper before first CPU enable, safe capture abort (%0d backing requests, manager=%0d)", RAM_BYTES, backing_requests, USE_MANAGER);
         $finish;
     end
     initial begin #40000000; $fatal(1, "Joint MBC5 snapshot timeout"); end
