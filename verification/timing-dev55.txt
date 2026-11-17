@@ -8,4 +8,6 @@ Pulse width worst +1.958 ns
 57765 timing paths, 35123 endpoints
 BIN SHA256 726d905506f96543fa2123b60394b37181993ac524d738ca08476184c574a9de
 SYN structure guard + 70 exact word-count checks + 44 full-regression PASS.
-Hardware save/load acceptance remains pending.
+Hardware: Tetris save, gameplay restore, and full OFF/USB-disconnect/reboot restore passed.
+Zelda user-reported usable; exact power-cycle scope not separately confirmed.
+Mario snapshot unsupported; StarOcean not retested. Transfer speed remains a TODO.

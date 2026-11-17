@@ -1,0 +1,22 @@
+{
+  "system": "4.6-dev5.5",
+  "mcu": "0.13.8-dev5.5",
+  "base_fpga": "18.14",
+  "fpga_bin_sha256": "726d905506f96543fa2123b60394b37181993ac524d738ca08476184c574a9de",
+  "mcu_bin_sha256": "22dec53fa107e51feb31db004f39dfa4d509121732ef34203dcb9d443fcaec9a",
+  "regression_pass_count": 44,
+  "synthesized_length_cases_pass": 70,
+  "timing_violations": 0,
+  "tetris": {
+    "save_words": 10341,
+    "save": "passed",
+    "gameplay_restore": "passed_user_and_log",
+    "full_power_cycle_restore": "passed_user_report",
+    "capture_ms": 70,
+    "restore_core_ms": 90
+  },
+  "zelda": "user_reported_usable_scope_not_separately_split",
+  "star_ocean": "not_retested",
+  "mario_land": "ordinary_gameplay_works_snapshot_unsupported",
+  "speed_optimization": "not_implemented; UART1 RX threshold/timeout change is next MCU-only experiment"
+}
