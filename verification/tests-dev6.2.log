@@ -1,0 +1,25 @@
+4.6-dev6.2-test targeted offline verification
+PASS MBC1 ROM=0 RAM=0 mapper=1 MBC1M=0 alias=0: zlib CRC from arbitrary initial banks, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=1 RAM=0 mapper=1 MBC1M=0 alias=0: zlib CRC from arbitrary initial banks, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=3 RAM=0 mapper=2 MBC1M=0 alias=0: zlib CRC from arbitrary initial banks, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=4 RAM=3 mapper=3 MBC1M=0 alias=0: zlib CRC from arbitrary initial banks, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=5 RAM=2 mapper=3 MBC1M=0 alias=0: zlib CRC from arbitrary initial banks, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=6 RAM=2 mapper=3 MBC1M=0 alias=0: zlib CRC from arbitrary initial banks, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=5 RAM=2 mapper=3 MBC1M=1 alias=0: zlib CRC from arbitrary initial banks, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=5 RAM=2 mapper=3 MBC1M=0 alias=1: zlib CRC from arbitrary initial banks, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS
+PASS     MBC5 262144-byte full ROM CRC from arbitrary initial bank, exact bus timing, bank restoration, reset/ejection and unsupported header
+PASS     MBC5 262144-byte full ROM CRC from arbitrary initial bank, exact bus timing, bank restoration, reset/ejection and unsupported header
+PASS ROM-only 32768-byte full ROM CRC from arbitrary initial bank, exact bus timing, bank restoration, reset/ejection and unsupported header
+PASS mode1 prior-bank invalid header safely rejected without writes
+PASS MBC1 ROM=5 RAM=2 mapper=3 MBC1M=0 alias=0: zlib CRC from arbitrary initial banks, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS production MCU SPI cache and command dispatch; separate file inventory read-only ASan/UBSan test.
+PASS MCU application build ESP-IDF5.3, 15% app partition free.
+PASS Gowin final source synthesis guard and PNR exit0, original constraints, Map2/Place1/Route0/fan60.
+PASS routed timing ns setup0.002 hold0.194 recovery0.078 removal0.354 min-pulse1.959.
+Physical dev6.1 warm save/load and file persistence confirmed; dev6.1 full-power-cycle identity drift reproduced.
+Physical dev6.2 corrected FPGA and MCU written+verified. New slot3 complete power-off restore succeeded in logs, 10341words/1460ms; user confirmed successful restore. New save 990ms and1120ms including mount/sync.
+Physical old-identity slot1 andslot2 each imported2 generations with full close/readback verification. Slot3 existingtarget skipped; sourcefiles preserved.
+PASS explicit import tests ASan/UBSan with forced fdopen ENOSYS, short-write/open/sync/close failures; source unchanged and existing targets preserved.
+
+Physical imported old slot2 restored10341words in1450ms, user confirmed original position.

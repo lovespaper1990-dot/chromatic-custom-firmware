@@ -10,6 +10,8 @@ void Snapshot_AttachSPI(SnapshotSPITransfer transfer);
 void Snapshot_Init(void);
 void Snapshot_Start(bool load);
 bool Snapshot_StartSlot(bool load, unsigned slot_number);
+bool Snapshot_ListFiles(void);
+bool Snapshot_Import(const uint8_t source_id[SNAP_ID_BYTES]);
 unsigned Snapshot_OperationSlot(void);
 const char *Snapshot_StatusForSlot(unsigned slot_number);
 bool Snapshot_Busy(void);

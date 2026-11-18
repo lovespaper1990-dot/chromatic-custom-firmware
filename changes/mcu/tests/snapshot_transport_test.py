@@ -324,6 +324,7 @@ static const char *esp_err_to_name(esp_err_t err) { (void)err; return "test"; }
 static TickType_t xTaskGetTickCount(void) { return 10; }
 static unsigned ticks_elapsed_ms(TickType_t now, TickType_t before) { return now-before; }
 static void finish_phase(TickType_t now) { (void)now; }
+static void start_phase(const char *name) { (void)name; }
 static void vTaskDelete(void *task) { (void)task; }
 void Snapshot_PrintDiagnostics(void) {}
 static void (*parked_worker)(void *);
@@ -336,6 +337,16 @@ static int xTaskCreate(void (*fn)(void *), const char *name, int stack, void *ar
 static unsigned received_slot;
 static bool received_load;
 static snap_result_t mock_result;
+static uint8_t import_source[SNAP_ID_BYTES];
+static unsigned imports;
+static bool received_listing;
+static snap_result_t list_snapshot_files(const char *base) { (void)base; received_listing=true; return mock_result; }
+static esp_err_t esp_vfs_fat_sdcard_unmount(const char *path,sdmmc_card_t *card) { (void)path; (void)card; return ESP_OK; }
+static snap_result_t identity(uint8_t id[SNAP_ID_BYTES]) { memcpy(id,(uint8_t[]){0x1b,3,3,0xca,1,2,3,4},8); return SNAP_OK; }
+snap_result_t snap_import_slots(const char *base,const uint8_t *old_id,const uint8_t *new_id) {
+    (void)base; assert(!memcmp(old_id,(uint8_t[]){0x1b,3,3,0xca,5,6,7,8},8));
+    assert(!memcmp(new_id,(uint8_t[]){0x1b,3,3,0xca,1,2,3,4},8)); ++imports; return SNAP_OK;
+}
 static snap_result_t run(bool load,unsigned slot,sdmmc_card_t *card) {
     (void)card; received_load=load; received_slot=slot; return mock_result;
 }
@@ -379,13 +390,24 @@ int main(void) {
     cmd[2]="22"; assert(report_snapshot(3,cmd)==1 && !parked_worker);
     cmd[2]=""; assert(report_snapshot(3,cmd)==1 && !parked_worker);
     cmd[1]="load"; assert(report_snapshot(2,cmd)==1 && !parked_worker);
+    cmd[1]="files"; assert(!report_snapshot(2,cmd) && Snapshot_Busy());
+    assert(!Snapshot_StartSlot(false,1) && !Snapshot_ListFiles()); finish();
+    assert(received_listing && !Snapshot_Busy());
+    assert(report_snapshot(3,cmd)==1 && !parked_worker);
+    uint8_t old_id[]={0x1b,3,3,0xca,5,6,7,8};
+    assert(Snapshot_Import(old_id)); old_id[7]=9;
+    assert(!Snapshot_StartSlot(false,1) && !Snapshot_Import(old_id)); finish();
+    assert(imports==1 && !Snapshot_Busy());
+    cmd[1]="import"; cmd[2]="1b0303ca05060708"; assert(!report_snapshot(3,cmd)); finish();
+    assert(imports==2); cmd[2]="1b0303ca0506070x"; assert(report_snapshot(3,cmd)==1);
+    cmd[2]="1b0303ca050607080"; assert(report_snapshot(3,cmd)==1);
     puts("PASS slot dispatch: competing starts accept one immutable target, worker results bound to slot, default slot 1, valid/invalid console requests, SD/task errors");
 }
 '''
 state_definition = source[source.index("enum { MSG_SAVING"):source.index("static atomic_uint transferred")]
 entry_points = "\n".join(function(n) for n in (
     "Snapshot_Busy", "Snapshot_Status", "Snapshot_OperationSlot", "Snapshot_StatusForSlot",
-    "worker", "Snapshot_StartSlot", "Snapshot_Start"))
+    "worker", "start_operation", "Snapshot_StartSlot", "Snapshot_ListFiles", "Snapshot_Import", "Snapshot_Start"))
 command = function("report_snapshot", (root / "main/main.c").read_text())
 for harness in (prefix + functions + tests, operation_stubs + operations + operation_tests,
                 request_stubs + state_definition + entry_points + command + request_tests):

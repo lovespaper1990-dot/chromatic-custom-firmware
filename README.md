@@ -1,8 +1,10 @@
-# Chromatic 定制固件 4.6-dev6.1-test
+# Chromatic 定制固件 4.6-dev6.2-test
+
+[dev6.2 卡带启动识别修正与真机进展](docs/4.6-dev6.2-test测试说明.md)。dev6.1 实机存读档约 1.2～1.5 秒，断电后出现识别码变化，dev6.2 已修正扫描并刷入，原配《俄罗斯方块》的新 3 号槽已通过完整断电恢复。
 
 每款受支持的游戏有 3 个可选即时存档位。插卡开机后自动识别游戏，在「主页 → 即时存档」按 START 切换 1、2、3 号，按 A 保存，按 B 两次读档。已有的快照直接用 1 号位读取。[三槽操作与离线验证](docs/4.6-dev6.1-test测试说明.md)
 
-本项目适用于配备 ESP32 和机内 microSD 卡座的 ModRetro Chromatic。dev6.1 是离线验证的非官方测试固件，沿用 dev6 的标准 MBC1 适配和高速 SPI。dev5.5 的原配《俄罗斯方块》已通过真机保存、读档与断电恢复，《塞尔达》有可用反馈。dev6.1 的实际耗时与《马里奥大陆》《星之海洋》的实卡表现仍待测。[dev6 卡带范围和传输说明](docs/4.6-dev6-test测试说明.md)
+本项目适用于配备 ESP32 和机内 microSD 卡座的 ModRetro Chromatic。dev6.2 是非官方测试固件，沿用标准 MBC1 适配和高速 SPI。dev5.5 的原配《俄罗斯方块》已通过真机保存、读档与断电恢复，《塞尔达》有可用反馈。dev6.2 的《俄罗斯方块》实测保存约 1 秒、读档约 1.3～1.5 秒。《马里奥大陆》和《星之海洋》的实卡表现仍待测。[dev6 卡带范围和传输说明](docs/4.6-dev6-test测试说明.md)
 
 [dev5.5 修正与测试记录](docs/4.6-dev5.5测试说明.md) · [SD 识别修正](docs/4.6-dev5.2测试说明.md) · [dev5 测试说明](docs/4.6-dev5-test测试说明.md) · [即时存档研究与实现](docs/即时存档研究与实现.md) · [dev4 真机验证记录](docs/4.6-dev4-test测试说明.md)
 
@@ -19,7 +21,7 @@
 
 ## 源码和构建
 
-本轮开发日期为 2026-11-18。[changes/fpga](changes/fpga) 和 [changes/mcu](changes/mcu) 包含新增或修改的源码、测试和配置。仓库通过 Git 子模块锁定 ModRetro FPGA v18.14、MCU v4.6 及上游指定的 Gameboy_MiSTer 核心。系统菜单版本为 4.6-dev6.1-test，ESP32 应用版本为 0.13.8-dev6.1-test。
+本轮开发日期为 2026-11-18。[changes/fpga](changes/fpga) 和 [changes/mcu](changes/mcu) 包含新增或修改的源码、测试和配置。仓库通过 Git 子模块锁定 ModRetro FPGA v18.14、MCU v4.6 及上游指定的 Gameboy_MiSTer 核心。系统菜单版本为 4.6-dev6.2-test，ESP32 应用版本为 0.13.8-dev6.2-test。
 
 在新的目录中获取此版本的源码，然后把定制文件放入对应的上游目录。
 

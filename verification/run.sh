@@ -18,5 +18,7 @@ cc -std=c11 -Wall -Wextra -Werror -Imcu/components/bt_audio \
 "$tmp/volume-test"
 python3 mcu/tests/fpga_rx_framing_test.py
 python3 mcu/tests/snapshot_menu_test.py
+python3 mcu/tests/snapshot_files_test.py
+python3 mcu/tests/snapshot_import_test.py
 python3 mcu/tests/snapshot_transport_test.py
 python3 fpga/tests/run_snapshot.py

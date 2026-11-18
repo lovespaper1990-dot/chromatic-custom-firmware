@@ -111,6 +111,20 @@ static int report_snapshot(int argc, char **argv)
         Snapshot_PrintDiagnostics();
         return 0;
     }
+    if (argc == 2 && !strcmp(argv[1], "files")) {
+        bool accepted = Snapshot_ListFiles();
+        Snapshot_PrintDiagnostics();
+        return accepted ? 0 : 1;
+    }
+    if (argc == 3 && !strcmp(argv[1], "import")) {
+        if (strlen(argv[2]) != 16 || strspn(argv[2], "0123456789abcdefABCDEF") != 16) goto usage;
+        uint8_t source_id[SNAP_ID_BYTES];
+        for (unsigned i = 0; i < SNAP_ID_BYTES; ++i)
+            if (sscanf(argv[2] + i * 2, "%2hhx", &source_id[i]) != 1) goto usage;
+        bool accepted = Snapshot_Import(source_id);
+        Snapshot_PrintDiagnostics();
+        return accepted ? 0 : 1;
+    }
     if ((argc == 2 || argc == 3) && !strcmp(argv[1], "save")) {
         unsigned slot_number = 1;
         if (argc == 3 && (argv[2][0] < '1' || argv[2][0] >= '1' + SNAP_SLOT_COUNT || argv[2][1] != '\0'))
@@ -121,7 +135,7 @@ static int report_snapshot(int argc, char **argv)
         return accepted ? 0 : 1;
     }
 usage:
-    printf("Usage: snapshot [save [1|2|3]]\n");
+    printf("Usage: snapshot [files|save [1|2|3]|import OLD_ID_16HEX]\n");
     return 1;
 }
 

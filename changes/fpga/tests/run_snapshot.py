@@ -89,6 +89,22 @@ with tempfile.TemporaryDirectory() as temp:
             + ["-s", "snapshot_cart_mbc1_tb", "-o", "probe_mbc1",
                tests / "snapshot_cart_mbc1_tb.sv", rtl / "EMU/snapshot_cart.v"], temp, True)
         run(vvp + ["probe_mbc1"], temp)
+    # A physical mapper can retain a previous game's selected bank through
+    # an FPGA-only reset. Fingerprints must use an explicitly selected bank1.
+    for start_bank in (0, 257):
+        run(ivl + [f"-Psnapshot_cart_mbc5_tb.START_BANK={start_bank}",
+                   "-s", "snapshot_cart_mbc5_tb", "-o", "prior_bank",
+                   tests / "snapshot_cart_mbc5_tb.sv", rtl / "EMU/snapshot_cart.v"], temp, True)
+        run(vvp + ["prior_bank"], temp)
+    for mode, high in ((0, 2), (1, 0), (1, 1)):
+        run(ivl + ["-Psnapshot_cart_mbc1_tb.ROM_CODE=5",
+                   "-Psnapshot_cart_mbc1_tb.RAM_CODE=2",
+                   "-Psnapshot_cart_mbc1_tb.START_LOW=7",
+                   f"-Psnapshot_cart_mbc1_tb.START_HIGH={high}",
+                   f"-Psnapshot_cart_mbc1_tb.START_MODE={mode}",
+                   "-s", "snapshot_cart_mbc1_tb", "-o", "prior_mbc1",
+                   tests / "snapshot_cart_mbc1_tb.sv", rtl / "EMU/snapshot_cart.v"], temp, True)
+        run(vvp + ["prior_mbc1"], temp)
     # ROM-only terminal CRC drains without starting another physical read.
     run(ivl + ["-Psnapshot_cart_mbc5_tb.ROM_ONLY=1", "-s", "snapshot_cart_mbc5_tb",
                "-o", "rom_only", tests / "snapshot_cart_mbc5_tb.sv",

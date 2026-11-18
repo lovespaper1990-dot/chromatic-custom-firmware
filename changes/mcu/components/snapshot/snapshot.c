@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 #include "sdmmc_cmd.h"
 #include <errno.h>
+#include <dirent.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
@@ -21,13 +22,13 @@ enum { RX_BYTES = 10, CONTROL = 0x20, READ_WORD = 0x21, WRITE_WORD = 0x22,
        PREPARE_BLOCK = 0x23, COMMIT_BLOCK = 0x24, BLOCK_WORDS = 128 };
 enum { STATUS, CAPTURE, RESTORE, IDENTITY, DIAGNOSTICS, CAPABILITY };
 static QueueHandle_t replies;
-enum { MSG_SAVING = SNAP_HW + 1, MSG_LOADING, MSG_SAVED, MSG_RESTORED, MSG_NO_SD, MSG_COUNT };
+enum { MSG_SAVING = SNAP_HW + 1, MSG_LOADING, MSG_SAVED, MSG_RESTORED, MSG_NO_SD, MSG_LISTING, MSG_IMPORTING, MSG_COUNT };
 static const char *const messages[MSG_COUNT] = {
     [SNAP_OK] = "A: Save\nB: Load", [SNAP_EMPTY] = "No snapshot", [SNAP_INVALID] = "Bad file",
     [SNAP_IO] = "Card error", [SNAP_LINK] = "FPGA timeout", [SNAP_UNSUPPORTED] = "Unsupported",
     [SNAP_WRONG] = "Wrong game", [SNAP_BUSY] = "Busy", [SNAP_HW] = "FPGA error",
     [MSG_SAVING] = "Saving...", [MSG_LOADING] = "Loading...", [MSG_SAVED] = "Saved",
-    [MSG_RESTORED] = "Restored", [MSG_NO_SD] = "No SD card"
+    [MSG_RESTORED] = "Restored", [MSG_NO_SD] = "No SD card", [MSG_LISTING] = "Busy", [MSG_IMPORTING] = "Busy"
 };
 // Publish the busy flag, target slot and message in a single state change.
 // Zero initializes to the help text for slot 1.
@@ -43,7 +44,7 @@ static unsigned operation_slot(unsigned state)
 static bool operation_busy(unsigned state)
 {
     unsigned message = state % MSG_COUNT;
-    return message == MSG_SAVING || message == MSG_LOADING;
+    return message == MSG_SAVING || message == MSG_LOADING || message == MSG_LISTING || message == MSG_IMPORTING;
 }
 static atomic_uint transferred;
 static atomic_uint word_count = SNAP_WORDS;
@@ -62,6 +63,7 @@ static SnapshotSPITransfer spi_transfer;
 static DMA_ATTR uint8_t block_packet[BLOCK_WORDS * SNAP_WORD_BYTES + 4];
 static bool block_transport, block_cached;
 static uint16_t block_first, block_count, block_filled;
+static uint8_t import_source[SNAP_ID_BYTES];
 
 void Snapshot_AttachSPI(SnapshotSPITransfer transfer)
 {
@@ -447,11 +449,120 @@ static snap_result_t run(bool load, unsigned slot_number, sdmmc_card_t *card)
     return rc;
 }
 
+typedef struct {
+    unsigned entries, files;
+    bool limited;
+} file_listing_t;
+
+static bool hexadecimal_name(const char *name, size_t length)
+{
+    if (strlen(name) != length) return false;
+    return strspn(name, "0123456789ABCDEFabcdef") == length;
+}
+
+static bool snapshot_filename(const char *name)
+{
+    return strlen(name) == 11 && strspn(name, "0123456789ABCDEFabcdef") == 8 &&
+           name[8] == '.' && (name[9] == 'S' || name[9] == 's') &&
+           (name[10] == '0' || name[10] == '1');
+}
+
+static snap_result_t print_snapshot_file(const char *path, const char *relative)
+{
+    struct stat metadata;
+    if (stat(path, &metadata) || !S_ISREG(metadata.st_mode)) return SNAP_IO;
+    FILE *file = fopen(path, "rb");
+    if (!file) return SNAP_IO;
+    uint8_t header[16] = {0};
+    size_t bytes = fread(header, 1, sizeof header, file);
+    bool failed = ferror(file);
+    if (fclose(file)) failed = true;
+    if (failed) return SNAP_IO;
+    bool css2 = bytes == sizeof header && memcmp(header, "CSS\2", 4) == 0;
+    uint32_t generation = (uint32_t)header[12] << 24 | (uint32_t)header[13] << 16 |
+                          (uint32_t)header[14] << 8 | header[15];
+    printf("{\"snapshot\":\"file\",\"path\":\"%s\",\"bytes\":%lu,\"css2_header\":%d,"
+           "\"identity\":\"%02x%02x%02x%02x%02x%02x%02x%02x\",\"generation\":%lu}\n",
+           relative, (unsigned long)metadata.st_size, css2,
+           header[4], header[5], header[6], header[7], header[8], header[9], header[10], header[11],
+           (unsigned long)generation);
+    return SNAP_OK;
+}
+
+static snap_result_t list_snapshot_directory(const char *base, const char *relative, file_listing_t *listing)
+{
+    char path[96];
+    int length = snprintf(path, sizeof path, "%s/%s", base, relative);
+    if (length < 0 || (size_t)length >= sizeof path) return SNAP_IO;
+    DIR *directory = opendir(path);
+    if (!directory) return errno == ENOENT ? SNAP_OK : SNAP_IO;
+    snap_result_t result = SNAP_OK;
+    for (;;) {
+        errno = 0;
+        struct dirent *entry = readdir(directory);
+        if (!entry) { if (errno) result = SNAP_IO; break; }
+        if (++listing->entries > 512 || listing->files >= 128) {
+            listing->limited = true;
+            break;
+        }
+        if (!snapshot_filename(entry->d_name)) continue;
+        char filename[96], display[48];
+        int size = snprintf(filename, sizeof filename, "%s/%s", path, entry->d_name);
+        int shown = snprintf(display, sizeof display, "%s%s%s", relative,
+                             *relative ? "/" : "", entry->d_name);
+        if (size < 0 || (size_t)size >= sizeof filename || shown < 0 || (size_t)shown >= sizeof display) {
+            result = SNAP_IO;
+            break;
+        }
+        result = print_snapshot_file(filename, display);
+        if (result != SNAP_OK) break;
+        ++listing->files;
+    }
+    if (closedir(directory)) result = SNAP_IO;
+    return result;
+}
+
+static snap_result_t list_snapshot_files(const char *base)
+{
+    file_listing_t listing = {0};
+    snap_result_t result = list_snapshot_directory(base, "", &listing);
+    for (unsigned slot = 2; slot <= SNAP_SLOT_COUNT && result == SNAP_OK && !listing.limited; ++slot) {
+        char path[96], relative[24], games[32][9];
+        unsigned count = 0;
+        int length = snprintf(path, sizeof path, "%s/SLOT%u", base, slot);
+        if (length < 0 || (size_t)length >= sizeof path) { result = SNAP_IO; break; }
+        DIR *directory = opendir(path);
+        if (!directory) {
+            if (errno != ENOENT) result = SNAP_IO;
+            continue;
+        }
+        for (;;) {
+            errno = 0;
+            struct dirent *entry = readdir(directory);
+            if (!entry) { if (errno) result = SNAP_IO; break; }
+            if (++listing.entries > 512) { listing.limited = true; break; }
+            if (!hexadecimal_name(entry->d_name, 8)) continue;
+            if (count == 32) { listing.limited = true; break; }
+            memcpy(games[count++], entry->d_name, 9);
+        }
+        if (closedir(directory)) result = SNAP_IO;
+        for (unsigned game = 0; game < count && result == SNAP_OK && !listing.limited; ++game) {
+            snprintf(relative, sizeof relative, "SLOT%u/%s", slot, games[game]);
+            result = list_snapshot_directory(base, relative, &listing);
+        }
+    }
+    printf("{\"snapshot\":\"files\",\"files\":%u,\"entries\":%u,\"limited\":%d,\"result\":%u}\n",
+           listing.files, listing.entries, listing.limited, result);
+    return result;
+}
+
 static void worker(void *arg)
 {
     unsigned request = (uintptr_t)arg;
     unsigned slot_number = operation_slot(request);
     bool load = request % MSG_COUNT == MSG_LOADING;
+    bool listing = request % MSG_COUNT == MSG_LISTING;
+    bool importing = request % MSG_COUNT == MSG_IMPORTING;
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
     sd_native_transaction = host.do_transaction;
     host.do_transaction = sd_transaction;
@@ -477,9 +588,25 @@ static void worker(void *arg)
         result = no_response && (mount == ESP_ERR_TIMEOUT || mount == ESP_ERR_NOT_FOUND) ? MSG_NO_SD : SNAP_IO;
         finish_phase(xTaskGetTickCount());
     } else {
-        snap_result_t rc = run(load, slot_number, card);
+        snap_result_t rc;
+        if (listing || importing) {
+            if (importing) {
+                uint8_t current[SNAP_ID_BYTES];
+                start_phase("identity");
+                rc = identity(current);
+                if (rc == SNAP_OK) {
+                    start_phase("import");
+                    rc = snap_import_slots("/sd/SNAP", import_source, current);
+                }
+            } else {
+                start_phase("files");
+                rc = list_snapshot_files("/sd/SNAP");
+            }
+            start_phase("unmount");
+            if (esp_vfs_fat_sdcard_unmount("/sd", card) != ESP_OK && rc == SNAP_OK) rc = SNAP_IO;
+        } else rc = run(load, slot_number, card);
         finish_phase(xTaskGetTickCount());
-        result = rc == SNAP_OK ? (load ? MSG_RESTORED : MSG_SAVED) : rc;
+        result = rc == SNAP_OK ? (listing || importing ? SNAP_OK : load ? MSG_RESTORED : MSG_SAVED) : rc;
     }
     atomic_store(&elapsed_ms, ticks_elapsed_ms(xTaskGetTickCount(), atomic_load(&started_tick)));
     atomic_store(&operation, operation_state(slot_number, result));
@@ -490,10 +617,9 @@ void Snapshot_Start(bool load)
 {
     (void)Snapshot_StartSlot(load, 1);
 }
-bool Snapshot_StartSlot(bool load, unsigned slot_number)
+static bool start_operation(unsigned request, const uint8_t source_id[SNAP_ID_BYTES])
 {
-    if (slot_number < 1 || slot_number > SNAP_SLOT_COUNT) return false;
-    unsigned request = operation_state(slot_number, load ? MSG_LOADING : MSG_SAVING);
+    unsigned slot_number = operation_slot(request);
     unsigned previous = atomic_load(&operation);
     if (operation_busy(previous) || !atomic_compare_exchange_strong(&operation, &previous, request))
         return false;
@@ -501,6 +627,7 @@ bool Snapshot_StartSlot(bool load, unsigned slot_number)
         atomic_store(&operation, operation_state(slot_number, SNAP_BUSY));
         return false;
     }
+    if (source_id) memcpy(import_source, source_id, sizeof import_source);
     TickType_t now = xTaskGetTickCount();
     atomic_store(&started_tick, now);
     atomic_store(&phase_started_tick, now);
@@ -516,4 +643,21 @@ bool Snapshot_StartSlot(bool load, unsigned slot_number)
         return false;
     }
     return true;
+}
+
+bool Snapshot_StartSlot(bool load, unsigned slot_number)
+{
+    if (slot_number < 1 || slot_number > SNAP_SLOT_COUNT) return false;
+    return start_operation(operation_state(slot_number, load ? MSG_LOADING : MSG_SAVING), NULL);
+}
+
+bool Snapshot_ListFiles(void)
+{
+    return start_operation(operation_state(Snapshot_OperationSlot(), MSG_LISTING), NULL);
+}
+
+bool Snapshot_Import(const uint8_t source_id[SNAP_ID_BYTES])
+{
+    if (!source_id) return false;
+    return start_operation(operation_state(Snapshot_OperationSlot(), MSG_IMPORTING), source_id);
 }

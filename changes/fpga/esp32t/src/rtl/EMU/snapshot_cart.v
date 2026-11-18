@@ -22,13 +22,15 @@ module snapshot_cart (
     reg finish_crc = 0;
     reg [7:0] header_calc;
     reg header_ok;
+    reg normalized = 0;
     // Physical MBC1M ignores low-bank bit 4. A standard bank-$10 selection
     // then aliases bank zero. Equal signatures conservatively reject it;
     // a collision can reject a standard cart, but cannot admit an alias.
     reg [15:0] logo_hash = 0, first_logo_hash = 0;
     reg multicart = 0;
     wire rom_only = mapper == 0 && rom_size == 0 && ram_size == 0;
-    wire mbc1 = rom_size <= 6 &&
+    reg mbc1 = 0;
+    wire standard_mbc1 = rom_size <= 6 &&
                 ((mapper == 1 && ram_size == 0) ||
                  ((mapper == 2 || mapper == 3) &&
                   (ram_size == 0 || ram_size == 2 ||
@@ -91,6 +93,8 @@ module snapshot_cart (
             header <= 0;
             header_calc <= 0;
             header_ok <= 0;
+            normalized <= 0;
+            mbc1 <= 0;
             logo_hash <= 0;
             first_logo_hash <= 0;
             multicart <= 0;
@@ -117,6 +121,9 @@ module snapshot_cart (
                         'h148: rom_size <= data;
                         'h149: ram_size <= data;
                         'h14d: begin
+                            // Size and mapper fields have settled since $149.
+                            // Register their class before driving mapper writes.
+                            mbc1 <= standard_mbc1;
                             header <= data;
                             header_ok <= data == header_calc;
                         end
@@ -132,6 +139,21 @@ module snapshot_cart (
                             if (first_pair && read_address == 'h14d &&
                                 (!header_ok || !(rom_only || mbc1 || mbc5)))
                                 finish_crc <= 1;
+                            else if (first_pair && read_address == 'h14d &&
+                                     !rom_only && !normalized) begin
+                                // The physical mapper survives an FPGA restart
+                                // and its power-up bank is not assumed. Only
+                                // normalize a validated, supported header, then
+                                // discard this probe and fingerprint bank zero
+                                // followed by a deliberately selected bank one.
+                                normalized <= 1;
+                                state <= BANK_LOW;
+                                crc <= 32'hffffffff;
+                                crc_steps <= 0;
+                                header_calc <= 0;
+                                logo_hash <= 0;
+                                first_logo_hash <= 0;
+                            end
                             else if (mbc1 && bank == 16 && read_address[13:0] == 'h133 &&
                                      logo_hash == first_logo_hash) begin
                                 multicart <= 1;
@@ -151,12 +173,12 @@ module snapshot_cart (
                         BANK_HIGH: begin
                             if (mbc1) state <= BANK_MODE;
                             else begin
-                                read_address <= 'h4000;
+                                read_address <= first_pair ? 0 : 'h4000;
                                 state <= READ;
                             end
                         end
                         BANK_MODE: begin
-                            read_address <= mbc1_low_window ? 0 : 'h4000;
+                            read_address <= first_pair || mbc1_low_window ? 0 : 'h4000;
                             state <= READ;
                         end
                         RESTORE_LOW: state <= RESTORE_HIGH;

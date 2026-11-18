@@ -1,5 +1,6 @@
 #include "slot.h"
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -147,27 +148,37 @@ done:
     return rc;
 }
 
-snap_result_t snap_slot_for_number(const char *directory, const uint8_t id[SNAP_ID_BYTES],
+static snap_result_t slot_directory(const char *base, const uint8_t id[SNAP_ID_BYTES],
+                                    unsigned slot_number, bool create, char directory[64])
+{
+    if (!slot_number || slot_number > SNAP_SLOT_COUNT) return SNAP_INVALID;
+    // The flat layout is shared with older firmware. New slots can use every
+    // identity byte in their path, including games with the same ROM CRC.
+    int n;
+    if (slot_number == 1) n = snprintf(directory, 64, "%s", base);
+    else {
+        char parent[64];
+        n = snprintf(parent, sizeof parent, "%s/SLOT%u", base, slot_number);
+        if (n < 0 || (size_t)n >= sizeof parent) return SNAP_IO;
+        n = snprintf(directory, 64, "%s/%08lX", parent,
+                     (unsigned long)read32(id));
+        if (n < 0 || n >= 64) return SNAP_IO;
+        if (create) {
+            if (mkdir(parent, 0777) && errno != EEXIST) return SNAP_IO;
+            if (mkdir(directory, 0777) && errno != EEXIST) return SNAP_IO;
+        }
+    }
+    return n < 0 || n >= 64 ? SNAP_IO : SNAP_OK;
+}
+
+snap_result_t snap_slot_for_number(const char *base, const uint8_t id[SNAP_ID_BYTES],
                                    unsigned slot_number, bool loading, snap_word_fn transfer)
 {
     if (!slot_number || slot_number > SNAP_SLOT_COUNT) return SNAP_INVALID;
     if (!snap_word_count(id)) return SNAP_UNSUPPORTED;
-    // The flat layout is shared with older firmware. New slots can use every
-    // identity byte in their path, including games with the same ROM CRC.
-    char game_directory[64];
-    if (slot_number != 1) {
-        char slot_directory[64];
-        int n = snprintf(slot_directory, sizeof slot_directory, "%s/SLOT%u", directory, slot_number);
-        if (n < 0 || (size_t)n >= sizeof slot_directory) return SNAP_IO;
-        n = snprintf(game_directory, sizeof game_directory, "%s/%08lX", slot_directory,
-                     (unsigned long)read32(id));
-        if (n < 0 || (size_t)n >= sizeof game_directory) return SNAP_IO;
-        if (!loading) {
-            if (mkdir(slot_directory, 0777) && errno != EEXIST) return SNAP_IO;
-            if (mkdir(game_directory, 0777) && errno != EEXIST) return SNAP_IO;
-        }
-        directory = game_directory;
-    }
+    char directory[64];
+    snap_result_t directory_result = slot_directory(base, id, slot_number, !loading, directory);
+    if (directory_result != SNAP_OK) return directory_result;
     char paths[2][64];
     slot_record_t records[2];
     snap_result_t status[2];
@@ -209,4 +220,150 @@ snap_result_t snap_slot_for_number(const char *directory, const uint8_t id[SNAP_
 snap_result_t snap_slot(const char *directory, const uint8_t id[SNAP_ID_BYTES], bool loading, snap_word_fn transfer)
 {
     return snap_slot_for_number(directory, id, 1, loading, transfer);
+}
+
+static snap_result_t import_file(const char *source, const char *destination,
+                                const uint8_t old_id[SNAP_ID_BYTES], const uint8_t new_id[SNAP_ID_BYTES],
+                                const slot_record_t *expected)
+{
+    const char *stage = "source_open";
+    errno = 0;
+    FILE *input = fopen(source, "rb");
+    uint8_t header[HEADER_BYTES], chunk[CHUNK_WORDS * SNAP_WORD_BYTES], tail[4];
+    snap_result_t result = SNAP_IO;
+    int output = -1, error = 0;
+    bool created = false;
+    uint32_t new_crc = 0;
+    if (!input) goto done;
+    result = SNAP_INVALID;
+    stage = "source_header";
+    if (fread(header, 1, sizeof header, input) != sizeof header ||
+        memcmp(header, format, sizeof format) || memcmp(header + 4, old_id, SNAP_ID_BYTES) ||
+        read32(header + 12) != expected->generation) goto done;
+    uint32_t old_crc = crc_update(UINT32_MAX, header, sizeof header);
+    memcpy(header + 4, new_id, SNAP_ID_BYTES);
+    new_crc = crc_update(UINT32_MAX, header, sizeof header);
+    stage = "target_open";
+    output = open(destination, O_CREAT | O_EXCL | O_WRONLY, 0666);
+    if (output < 0) { result = errno == EEXIST ? SNAP_BUSY : SNAP_IO; goto done; }
+    created = true;
+    result = SNAP_IO;
+    // FatFs has no fcntl callback. Newlib fdopen performs F_GETFL, so use
+    // the exclusive descriptor directly through the supported VFS methods.
+    stage = "target_header";
+    if (write(output, header, sizeof header) != (ssize_t)sizeof header) goto done;
+    size_t remaining = (size_t)snap_word_count(old_id) * SNAP_WORD_BYTES;
+    while (remaining) {
+        size_t bytes = remaining < sizeof chunk ? remaining : sizeof chunk;
+        stage = "source_read";
+        if (fread(chunk, 1, bytes, input) != bytes) goto done;
+        old_crc = crc_update(old_crc, chunk, bytes);
+        new_crc = crc_update(new_crc, chunk, bytes);
+        stage = "target_write";
+        if (write(output, chunk, bytes) != (ssize_t)bytes) goto done;
+        remaining -= bytes;
+    }
+    stage = "source_crc";
+    if (fread(tail, 1, sizeof tail, input) != sizeof tail || read32(tail) != ~old_crc ||
+        ~old_crc != expected->crc || fgetc(input) != EOF || ferror(input)) {
+        result = SNAP_INVALID;
+        goto done;
+    }
+    put32(tail, ~new_crc);
+    stage = "target_tail";
+    if (write(output, tail, sizeof tail) != (ssize_t)sizeof tail) goto done;
+    stage = "target_sync";
+    if (fsync(output)) goto done;
+    result = SNAP_OK;
+done:
+    if (result != SNAP_OK) error = errno;
+    if (input) {
+        if (ferror(input)) result = SNAP_IO;
+        if (fclose(input) && result == SNAP_OK) {
+            stage = "source_close"; error = errno; result = SNAP_IO;
+        }
+    }
+    if (output >= 0 && close(output) && result == SNAP_OK) {
+        stage = "target_close"; error = errno; result = SNAP_IO;
+    }
+    if (result == SNAP_OK) {
+        slot_record_t verified;
+        stage = "target_verify";
+        result = read_slot(destination, new_id, &verified, NULL);
+        if (result != SNAP_OK) error = errno;
+        if (result == SNAP_OK && (verified.generation != expected->generation || verified.crc != ~new_crc))
+            result = SNAP_INVALID;
+    }
+    // The source is always read-only. Clean up only this attempt's failed new file.
+    if (result != SNAP_OK && created && unlink(destination)) {
+        stage = "target_cleanup"; error = errno; result = SNAP_IO;
+    }
+    if (result != SNAP_OK)
+        printf("SNAPSHOT import path=%s stage=%s errno=%d result=%u\n", destination, stage, error, result);
+    return result;
+}
+
+static snap_result_t import_slot(const char *base, const uint8_t old_id[SNAP_ID_BYTES],
+                                const uint8_t new_id[SNAP_ID_BYTES], unsigned slot_number, unsigned *copied)
+{
+    char directory[64], sources[2][64], targets[2][64];
+    snap_result_t result = slot_directory(base, old_id, slot_number, false, directory);
+    if (result != SNAP_OK) return result;
+    struct stat metadata;
+    for (unsigned i = 0; i < 2; ++i) {
+        int source_length = snprintf(sources[i], sizeof sources[i], "%s/%08lX.S%u",
+                                     directory, (unsigned long)read32(old_id + 4), i);
+        int target_length = snprintf(targets[i], sizeof targets[i], "%s/%08lX.S%u",
+                                     directory, (unsigned long)read32(new_id + 4), i);
+        if (source_length < 0 || (size_t)source_length >= sizeof sources[i] ||
+            target_length < 0 || (size_t)target_length >= sizeof targets[i]) return SNAP_IO;
+        if (!stat(targets[i], &metadata)) return SNAP_BUSY;
+        if (errno != ENOENT) {
+            printf("SNAPSHOT import slot=%u generation=%u stage=target_stat errno=%d\n", slot_number, i, errno);
+            return SNAP_IO;
+        }
+    }
+    slot_record_t records[2];
+    snap_result_t statuses[2];
+    int latest = -1;
+    for (unsigned i = 0; i < 2; ++i) {
+        statuses[i] = read_slot(sources[i], old_id, &records[i], NULL);
+        if (statuses[i] == SNAP_IO || statuses[i] == SNAP_WRONG) {
+            printf("SNAPSHOT import slot=%u generation=%u stage=source_validate errno=%d result=%u\n",
+                   slot_number, i, errno, statuses[i]);
+            return statuses[i];
+        }
+        if (statuses[i] == SNAP_OK && (latest < 0 ||
+            (int32_t)(records[i].generation - records[latest].generation) > 0)) latest = i;
+    }
+    if (latest < 0)
+        return statuses[0] == SNAP_EMPTY && statuses[1] == SNAP_EMPTY ? SNAP_EMPTY : SNAP_INVALID;
+    // Publish the newest valid generation first so an interrupted import is useful.
+    for (unsigned step = 0; step < 2; ++step) {
+        unsigned index = (latest + step) % 2;
+        if (statuses[index] != SNAP_OK) continue;
+        result = import_file(sources[index], targets[index], old_id, new_id, &records[index]);
+        if (result != SNAP_OK) return result;
+        ++*copied;
+    }
+    return SNAP_OK;
+}
+
+snap_result_t snap_import_slots(const char *directory, const uint8_t old_id[SNAP_ID_BYTES],
+                                const uint8_t new_id[SNAP_ID_BYTES])
+{
+    if (!old_id || !new_id || !directory || !memcmp(old_id, new_id, SNAP_ID_BYTES)) return SNAP_INVALID;
+    if (memcmp(old_id, new_id, 4)) return SNAP_WRONG;
+    if (!snap_word_count(old_id) || snap_word_count(old_id) != snap_word_count(new_id)) return SNAP_UNSUPPORTED;
+    snap_result_t overall = SNAP_EMPTY;
+    for (unsigned slot = 1; slot <= SNAP_SLOT_COUNT; ++slot) {
+        unsigned copied = 0;
+        snap_result_t result = import_slot(directory, old_id, new_id, slot, &copied);
+        printf("{\"snapshot\":\"import\",\"slot\":%u,\"copied\":%u,\"skipped\":%d,\"result\":%u}\n",
+               slot, copied, result == SNAP_BUSY, result);
+        if (result == SNAP_OK || result == SNAP_BUSY) {
+            if (overall == SNAP_EMPTY) overall = SNAP_OK;
+        } else if (result != SNAP_EMPTY && (overall == SNAP_EMPTY || overall == SNAP_OK)) overall = result;
+    }
+    return overall;
 }
