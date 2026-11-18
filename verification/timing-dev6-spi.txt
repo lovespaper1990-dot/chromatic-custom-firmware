@@ -1,0 +1,9 @@
+GW5A-25A, Map2/Place1/Route0/fan60, original constraints.
+SPI bulk build with legacy word transport disabled in FPGA.
+Synthesis guard passed; vendor PNR exited 0; all nets routed.
+No setup or hold violations. Worst margins (ns):
+setup +0.004, hold +0.127, recovery +0.256, removal +0.311, pulse +1.961.
+Routed logic 21619/23040, CLS 11361/11520, BSRAM 56/56.
+BIN SHA256 25576746ac495e8dfbc2c6468232d39bbc384f0edf15fca8e30ef4f82eaed8aa.
+All 203 RTL/HEX/CST/SDC inputs and project settings match the staged build.
+Offline result; measured operation speed and hardware compatibility remain unverified.

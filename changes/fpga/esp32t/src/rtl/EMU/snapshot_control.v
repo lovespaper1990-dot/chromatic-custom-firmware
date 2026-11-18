@@ -32,13 +32,14 @@ module snapshot_control #(parameter STALL_BITS = 22, parameter DIAGNOSTICS = 0, 
     wire memory_pending = owner != NONE && ack_sync[1] != mem_toggle;
     reg block_pending = 0, block_armed = 0;
     reg [7:0] block_command, block_count;
-    reg [13:0] block_index;
+    reg [6:0] block_page;
+    wire [13:0] block_index = {block_page, 7'd0};
     reg block_prepare = 0, block_commit = 0, block_clear = 0, block_upload = 0;
     reg block_mem_done = 0;
     wire block_done, block_good, block_mem_req, block_mem_read;
     wire [6:0] block_offset;
     wire [63:0] block_word;
-    wire work_pending = operation != IDLE || owner == READ || owner == WRITE || block_pending;
+    wire work_pending = operation != IDLE || (!BULK && (owner == READ || owner == WRITE)) || block_pending;
     wire failed = work_pending && (!supported || (&stall_count));
     assign active = operation != IDLE;
     wire [63:0] debug_payload = {debug_flags, debug_seen | debug_flags,
@@ -48,7 +49,10 @@ module snapshot_control #(parameter STALL_BITS = 22, parameter DIAGNOSTICS = 0, 
     reg [13:0] next_word = 0;
     wire [15:0] index = cmd == 7'h22 ? cmd_data[79:64] : cmd_data[15:0];
     wire [15:0] block_start = cmd_data[23:8];
-    wire [13:0] block_remaining = words - block_start[13:0];
+    // Starts are aligned to 128 words. A page comparison selects the final
+    // partial count without a fourteen-bit subtraction or end-pointer adder.
+    wire [6:0] final_page = words[13:7];
+    wire [7:0] tail_count = {1'b0, words[6:0]};
 
     generate if (BULK) begin : bulk_port
         snapshot_block_transfer transfer (
@@ -112,7 +116,7 @@ module snapshot_control #(parameter STALL_BITS = 22, parameter DIAGNOSTICS = 0, 
             if (DIAGNOSTICS) frozen_debug <= debug_payload;
             core_abort <= operation != IDLE;
             restart_core <= operation == LOADING;
-            if (owner == READ || owner == WRITE)
+            if (!BULK && (owner == READ || owner == WRITE))
                 respond_status(owner == READ ? 8'h21 : 8'h22, supported ? 3 : 2);
             if (block_pending) respond_status(block_command, supported ? 3 : 2);
             block_pending <= 0;
@@ -137,8 +141,10 @@ module snapshot_control #(parameter STALL_BITS = 22, parameter DIAGNOSTICS = 0, 
                 block_pending <= 0;
                 respond_status(block_command, block_good ? 0 : 4);
                 if (block_command == 8'h24 && block_good) begin
-                    next_word <= block_index + {6'd0, block_count};
-                    staged <= block_index + {6'd0, block_count} == words;
+                    // After the tail, no later aligned start is valid. Keep
+                    // the next page boundary instead of its unused tail offset.
+                    next_word <= {block_page + 7'd1, 7'd0};
+                    staged <= block_page == final_page;
                 end
             end
             if (operation != IDLE) begin
@@ -168,11 +174,11 @@ module snapshot_control #(parameter STALL_BITS = 22, parameter DIAGNOSTICS = 0, 
                         if (operation == SAVING && !mem_read && mem_index == 0 &&
                             mem_out[63:32] == 32'hb0ca) header_committed <= 1;
                     end
-                    READ: begin
+                    READ: if (!BULK) begin
                         reply <= {2'b00, mem_index, mem_in};
                         reply_toggle <= ~reply_toggle;
                     end
-                    WRITE: begin
+                    WRITE: if (!BULK) begin
                         next_word <= mem_index + 1'b1;
                         staged <= mem_index == words - 1 && supported;
                         // The request index and payload remain held until this ACK.
@@ -198,7 +204,7 @@ module snapshot_control #(parameter STALL_BITS = 22, parameter DIAGNOSTICS = 0, 
                 mem_out <= block_word;
                 mem_toggle <= ~mem_toggle;
             end
-            if (cmd_sync[1] != cmd_seen && owner != READ && owner != WRITE && !block_pending) begin
+            if (cmd_sync[1] != cmd_seen && (BULK || (owner != READ && owner != WRITE)) && !block_pending) begin
                 cmd_seen <= cmd_sync[1];
                 if (cmd == 7'h20) begin
                     case (cmd_data[7:0])
@@ -252,13 +258,18 @@ module snapshot_control #(parameter STALL_BITS = 22, parameter DIAGNOSTICS = 0, 
                     respond_status({1'b0,cmd}, 5);
                 else if (!supported)
                     respond_status({1'b0,cmd}, 2);
+                else if (BULK && (cmd == 7'h21 || cmd == 7'h22))
+                    // The advertised block protocol excludes legacy word I/O.
+                    respond_status({1'b0,cmd}, 3);
                 else if (BULK && (cmd == 7'h23 || cmd == 7'h24)) begin
                     // Direction byte, aligned word index and one reserved byte.
                     if (cmd_data[31:24] > 1 || cmd_data[7:0] != 0 ||
-                        block_start >= {2'd0, words} || block_start[6:0] != 0)
+                        block_start[15:14] != 0 || block_start[6:0] != 0 ||
+                        block_start[13:7] > final_page ||
+                        (block_start[13:7] == final_page && tail_count == 0))
                         respond_status({1'b0,cmd}, 3);
                     else if (cmd == 7'h24) begin
-                        if (!block_armed || !cmd_data[24] || block_start[13:0] != block_index)
+                        if (!block_armed || !cmd_data[24] || block_start[13:7] != block_page)
                             respond_status(8'h24, 4);
                         else begin
                             block_commit <= 1;
@@ -267,14 +278,14 @@ module snapshot_control #(parameter STALL_BITS = 22, parameter DIAGNOSTICS = 0, 
                             block_armed <= 0;
                         end
                     end else if ((!cmd_data[24] && !staged) ||
-                                 (cmd_data[24] && block_start != 0 && block_start[13:0] != next_word))
+                                 (cmd_data[24] && block_start[13:7] != 0 && block_start[13:7] != next_word[13:7]))
                         respond_status(8'h23, 4);
                     else begin
                         block_prepare <= 1;
                         block_pending <= 1;
                         block_command <= 8'h23;
-                        block_index <= block_start[13:0];
-                        block_count <= block_remaining > 14'd128 ? 8'd128 : block_remaining[7:0];
+                        block_page <= block_start[13:7];
+                        block_count <= block_start[13:7] == final_page ? tail_count : 8'd128;
                         block_upload <= cmd_data[24];
                         block_armed <= cmd_data[24];
                         if (cmd_data[24]) begin
@@ -283,22 +294,24 @@ module snapshot_control #(parameter STALL_BITS = 22, parameter DIAGNOSTICS = 0, 
                         end
                     end
                 end
-                else if (index >= words)
-                    respond_status({1'b0,cmd}, 3);
-                else if (cmd == 7'h21 && !staged)
-                    respond_status(8'h21, 4);
-                else if (cmd == 7'h22 && ((index != 0 && index != next_word &&
-                          index + 1 != next_word) || (index == 0 && cmd_data[63:32] != 32'hb0ca)))
-                    respond_status(8'h22, 3);
-                else if (cmd == 7'h21 || cmd == 7'h22) begin
-                    block_clear <= 1;
-                    block_armed <= 0;
-                    owner <= cmd == 7'h21 ? READ : WRITE;
-                    if (cmd == 7'h22) staged <= 0;
-                    mem_index <= index[13:0];
-                    mem_read <= cmd == 7'h21;
-                    mem_out <= cmd_data[63:0];
-                    mem_toggle <= ~mem_toggle;
+                else if (!BULK) begin
+                    if (index >= words)
+                        respond_status({1'b0,cmd}, 3);
+                    else if (cmd == 7'h21 && !staged)
+                        respond_status(8'h21, 4);
+                    else if (cmd == 7'h22 && ((index != 0 && index != next_word &&
+                              index + 1 != next_word) || (index == 0 && cmd_data[63:32] != 32'hb0ca)))
+                        respond_status(8'h22, 3);
+                    else if (cmd == 7'h21 || cmd == 7'h22) begin
+                        block_clear <= 1;
+                        block_armed <= 0;
+                        owner <= cmd == 7'h21 ? READ : WRITE;
+                        if (cmd == 7'h22) staged <= 0;
+                        mem_index <= index[13:0];
+                        mem_read <= cmd == 7'h21;
+                        mem_out <= cmd_data[63:0];
+                        mem_toggle <= ~mem_toggle;
+                    end else respond_status({1'b0,cmd}, 3);
                 end else respond_status({1'b0,cmd}, 3);
             end
         end

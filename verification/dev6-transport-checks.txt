@@ -7,3 +7,6 @@ PASS 10341-word SPI test also using Gowin GW5A's DPB simulation primitive
 PASS production MCU SPI cache and CRC in three geometries, ordered commit, legacy selection and tick wrap
 PASS ESP-IDF 5.3 dev6-test build; paired image remains within app partition
 Actual handheld duration and cartridge compatibility await physical testing.
+PASS compact FPGA controller for bulk 6309/10341-word and legacy 6309/7269/10341-word geometries.
+PASS alignment/count arithmetic over all 65536 addresses in each supported geometry.
+PASS Gowin compact SPI synthesis guard and route/timing at original constraints.
