@@ -2,7 +2,7 @@
 // Game Boy state engine stays paused until each byte transfer and the final
 // mapper restoration have finished. No SRAM write occurs during capture.
 module snapshot_mbc5 (
-    input clk, input reset, input enabled, input [7:0] ram_code,
+    input clk, input reset, input enabled, input mbc1, input [7:0] ram_code,
     input active, input abort, input restart_core,
     input core_req, input core_read, input [25:0] core_addr,
     input [63:0] core_out, output reg core_done = 0,
@@ -18,7 +18,8 @@ module snapshot_mbc5 (
 );
     localparam IDLE=0, MEM_WAIT=1, ENABLE_RAM=2, ENABLE_WAIT=3,
                SELECT_BANK=4, BANK_WAIT=5, BYTE_START=6, BYTE_WAIT=7,
-               RESTORE_START=8, RESTORE_WAIT=9, ABORT_WAIT=10;
+               RESTORE_START=8, RESTORE_WAIT=9, ABORT_WAIT=10,
+               RAM_MODE=11, RAM_MODE_WAIT=12;
     localparam COMMIT=0, FINISH_LOAD=1, RECOVER=2;
     reg [3:0] state = IDLE;
     reg [1:0] finish_mode = COMMIT, restore_step = 0;
@@ -28,6 +29,7 @@ module snapshot_mbc5 (
     assign core_in = word_data;
     reg [15:0] original_mapper = 1, loaded_mapper = 1, restore_mapper;
     reg session = 0, session_loading = 0, aborting = 0, mem_pending = 0;
+    wire [15:0] power_on_mapper = mbc1 ? 16'h0000 : 16'h0001;
     wire has_ram = ram_code == 2 || ram_code == 3;
     wire [13:0] last_word = ram_code == 3 ? 14'd10340 :
                                   ram_code == 2 ? 14'd7268 : 14'd6308;
@@ -56,7 +58,7 @@ module snapshot_mbc5 (
     // Include our own completed writes so the mirror describes the physical
     // mapper after a load, as well as after ordinary guest mapper writes.
     snapshot_mbc5_mapper mirror (
-        .clk(clk), .cart_ready(enabled && !reset),
+        .clk(clk), .cart_ready(enabled && !reset), .mbc1(mbc1),
         .write_n(take_bus ? cart_write_n : game_write_n),
         .address(take_bus ? cart_addr : game_addr),
         .data(take_bus ? cart_out : game_out), .mapper_state(current_mapper)
@@ -89,7 +91,7 @@ module snapshot_mbc5 (
             // restart_core also covers a load that stalled before its first request.
             // A failed capture resumes the existing guest mapper unchanged.
             if (enabled && (session_loading || restart_core)) take_bus <= 1;
-            restore_mapper <= session_loading || restart_core ? 16'h0001 : original_mapper;
+            restore_mapper <= session_loading || restart_core ? power_on_mapper : original_mapper;
             mem_pending <= 0;
             aborting <= 1;
         end else case (state)
@@ -146,7 +148,17 @@ module snapshot_mbc5 (
                 bus_start <= 1;
                 state <= ENABLE_WAIT;
             end
-            ENABLE_WAIT: if (bus_done) state <= SELECT_BANK;
+            ENABLE_WAIT: if (bus_done) state <= mbc1 ? RAM_MODE : SELECT_BANK;
+            // MBC1 only exposes its four RAM banks in advanced mode. The
+            // original mode/secondary registers remain saved until commit.
+            RAM_MODE: begin
+                bus_addr <= 16'h6000;
+                bus_out <= 8'h01;
+                bus_write <= 1;
+                bus_start <= 1;
+                state <= RAM_MODE_WAIT;
+            end
+            RAM_MODE_WAIT: if (bus_done) state <= SELECT_BANK;
             SELECT_BANK: begin
                 bus_addr <= 16'h4000;
                 bus_out <= {4'b0, ram_bank};
@@ -183,12 +195,21 @@ module snapshot_mbc5 (
             end
             RESTORE_START: begin
                 bus_write <= 1;
-                case (restore_step)
-                    0: begin bus_addr <= 16'h2000; bus_out <= restore_mapper[7:0]; end
-                    1: begin bus_addr <= 16'h3000; bus_out <= {7'b0, restore_mapper[8]}; end
-                    2: begin bus_addr <= 16'h4000; bus_out <= {4'b0, restore_mapper[12:9]}; end
-                    3: begin bus_addr <= 16'h0000; bus_out <= restore_mapper[15] ? 8'h0a : 8'h00; end
-                endcase
+                if (mbc1) begin
+                    case (restore_step)
+                        0: begin bus_addr <= 16'h2000; bus_out <= {3'b000, restore_mapper[4:0]}; end
+                        1: begin bus_addr <= 16'h4000; bus_out <= {6'b000000, restore_mapper[10:9]}; end
+                        2: begin bus_addr <= 16'h6000; bus_out <= {7'b0000000, restore_mapper[14]}; end
+                        3: begin bus_addr <= 16'h0000; bus_out <= restore_mapper[15] ? 8'h0a : 8'h00; end
+                    endcase
+                end else begin
+                    case (restore_step)
+                        0: begin bus_addr <= 16'h2000; bus_out <= restore_mapper[7:0]; end
+                        1: begin bus_addr <= 16'h3000; bus_out <= {7'b0, restore_mapper[8]}; end
+                        2: begin bus_addr <= 16'h4000; bus_out <= {4'b0, restore_mapper[12:9]}; end
+                        3: begin bus_addr <= 16'h0000; bus_out <= restore_mapper[15] ? 8'h0a : 8'h00; end
+                    endcase
+                end
                 bus_start <= 1;
                 state <= RESTORE_WAIT;
             end

@@ -19,7 +19,10 @@ module QSPI_Slave(
     output      [15:0]  qData,
     output  reg [31:0]  qAddress = 'd0,
     output  reg [9:0]   qLength = 'd0,
-    output  reg         qCommand = 'd0
+    output  reg         qCommand = 'd0,
+    output  reg         qOsdWrite = 0,
+    input               snapshot_miso,
+    input               snapshot_drive
 );
 
     // Command 0x015 and the 44.1 kHz phase increment follow Jokippo's
@@ -98,6 +101,16 @@ module QSPI_Slave(
 
     reg [7:0] qCycleCount = 'd0;
 
+    // Hold the command class through CS deassertion for the PSRAM writer.
+    // A bit error in a snapshot command must not classify it as an OSD write.
+    wire osd_header = qCommand && qLength == 10'd1023 &&
+                      qAddress[31:10] < 22'd45 && qAddress[9:0] == 0;
+    always @(posedge QSPI_CLK)
+        if (!QSPI_CS) begin
+            if (qCycleCount == 0) qOsdWrite <= 0;
+            else if (qCycleCount == 43) qOsdWrite <= osd_header;
+        end
+
     reg qMenuInit1 = 1'd0;
     reg qMenuInit2 = 1'd0;
     assign qMenuInit = qMenuInit2;
@@ -170,7 +183,8 @@ module QSPI_Slave(
         end
     end
 
-    assign QSPI_MISO = !QSPI_CS && wheel_xfer && qCycleCount >= 18 ? wheel_shift[31] :
+    assign QSPI_MISO = snapshot_drive ? snapshot_miso :
+                       !QSPI_CS && wheel_xfer && qCycleCount >= 18 ? wheel_shift[31] :
                        !QSPI_CS && audio_xfer && qCycleCount >= 18 ? (audio_bit & audio_xfer_live) : 1'bz;
 
     always@(posedge QSPI_CLK or posedge QSPI_CS)
@@ -207,7 +221,7 @@ module QSPI_Slave(
             if(qCycleCount == 43)
             begin
                 qAddReady <= 1'd1;
-                if(qCommand && qAddress == 0) // first display row
+                if(osd_header && qAddress == 0) // first display row
                 begin
                     qMenuInit1  <=  1'd1;
                     if(qMenuInit1)
@@ -218,7 +232,7 @@ module QSPI_Slave(
                 qAddReady <= 1'd0;
                 
             // QSPI data
-            if(qCommand && qCycleCount >= 46)
+            if(qOsdWrite && qCycleCount >= 46)
             begin
                 qCyclePhase      <= ~qCyclePhase;
                 if(qCyclePhase)

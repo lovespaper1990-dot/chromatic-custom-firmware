@@ -16,4 +16,5 @@ cc -std=c11 -Wall -Wextra -Werror -Imcu/components/snapshot \
 cc -std=c11 -Wall -Wextra -Werror -Imcu/components/bt_audio \
   mcu/tests/headphone_volume_test.c mcu/components/bt_audio/headphone_volume.c -o "$tmp/volume-test"
 "$tmp/volume-test"
+python3 mcu/tests/snapshot_transport_test.py
 python3 fpga/tests/run_snapshot.py

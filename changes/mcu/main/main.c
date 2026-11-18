@@ -9,6 +9,7 @@
 #include "esp_console.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "esp_vfs.h"
 #include "esp_vfs_fat.h"
@@ -134,6 +135,32 @@ static void read_headphone_wheel(void)
         HeadphoneVolume_SetStreamWheel(p[1]);
         ++wheel_replies;
     }
+}
+
+static bool snapshot_spi_transfer(bool read, uint8_t *packet, size_t bytes)
+{
+    if (!packet || !bytes || bytes > 1026 || !spi_gate ||
+        !xSemaphoreTake(spi_gate, pdMS_TO_TICKS(20))) return false;
+    // Let the FPGA observe idle chip select after a cancelled block or
+    // a preceding display/audio transaction on the shared bus.
+    esp_rom_delay_us(1);
+    spi_transaction_ext_t transfer = {
+        .base = {
+            .cmd = read ? 0x17 : 0x18,
+            .flags = SPI_TRANS_VARIABLE_CMD | SPI_TRANS_VARIABLE_ADDR | SPI_TRANS_VARIABLE_DUMMY,
+            .length = read ? 0 : bytes * 8,
+            .rxlength = read ? bytes * 8 : 0,
+            .tx_buffer = read ? NULL : packet,
+            .rx_buffer = read ? packet : NULL,
+        },
+        .command_bits = 11,
+        .address_bits = 0,
+        .dummy_bits = 7,
+    };
+    esp_err_t result = spi_device_transmit(spi, &transfer.base);
+    xSemaphoreGive(spi_gate);
+    if (result != ESP_OK) ESP_LOGE(TAG, "Snapshot SPI: %s", esp_err_to_name(result));
+    return result == ESP_OK;
 }
 
 // One hardware chip select carries both quad OSD writes and standard SPI PCM reads.
@@ -339,6 +366,10 @@ void app_main(void)
     uart_driver_install(UART_NUM_1, kFPGA_TxConsts_BufferSize, kFPGA_RxConsts_BufferSize, 0, NULL, 0);
     uart_param_config(UART_NUM_1, &uart_config);
     uart_set_pin(UART_NUM_1, PIN_NUM_UART_TO_FPGA, PIN_NUM_UART_FROM_FPGA, -1, -1);
+    // Continuous menu telemetry otherwise batches each snapshot reply behind
+    // the driver's 120-byte RX threshold. Keep the wire protocol unchanged.
+    ESP_ERROR_CHECK(uart_set_rx_full_threshold(UART_NUM_1, 8));
+    ESP_ERROR_CHECK(uart_set_rx_timeout(UART_NUM_1, 1));
 
     gpio_sleep_set_direction(PIN_NUM_UART_FROM_FPGA, GPIO_MODE_INPUT);
     gpio_sleep_set_pull_mode(PIN_NUM_UART_FROM_FPGA, GPIO_PULLUP_ONLY);
@@ -391,6 +422,7 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     spi_gate = xSemaphoreCreateMutexStatic(&spi_gate_storage);
+    Snapshot_AttachSPI(snapshot_spi_transfer);
     BT_AttachAudio(read_headphone_audio, FPGA_Tx_SendSysCtl);
 
     ESP_LOGI(TAG, "Initialize LVGL library");

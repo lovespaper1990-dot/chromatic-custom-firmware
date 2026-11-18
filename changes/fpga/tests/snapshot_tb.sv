@@ -15,9 +15,9 @@ module snapshot_tb #(parameter RAM_CODE = 0);
     reg [7:0] rom_byte;
     always_comb begin
         rom_byte = address ^ (address >> 8);
-        if (address == 'h147) rom_byte = wrong_mapper;
+        if (address == 'h147) rom_byte = wrong_mapper ? 8'h10 : 8'h00;
         if (address == 'h148 || address == 'h149) rom_byte = 0;
-        if (address == 'h14d) rom_byte = 'h7d - wrong_mapper;
+        if (address == 'h14d) rom_byte = wrong_mapper ? 8'h6d : 8'h7d;
     end
     snapshot_cart cart(hclk,ready,rom_byte,address,rd_n,complete,supported,identity);
     reg core_loaded=0;
@@ -39,7 +39,8 @@ module snapshot_tb #(parameter RAM_CODE = 0);
                              {16'h1b03, RAM_CODE[7:0], identity[39:0]};
     snapshot_control #(.STALL_BITS(9), .DIAGNOSTICS(1)) ctl(hclk,reset,supported,mailbox_id,command_toggle,cmd,payload,
         reply_toggle,reply,capture,restore,busy,core_req,core_read,core_addr,
-        core_out,core_done,req_toggle,index,read_word,word_out,ack,word_in,core_loaded,core_abort,restart_core,active,debug_flags);
+        core_out,core_done,req_toggle,index,read_word,word_out,ack,word_in,core_loaded,core_abort,restart_core,active,debug_flags,
+        1'b0,1'b1,1'b0, , );
     reg memory_reset=0;
     wire ram_req, ram_read;
     wire [22:0] ram_addr;

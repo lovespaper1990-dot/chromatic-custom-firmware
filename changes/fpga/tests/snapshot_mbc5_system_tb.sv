@@ -1,15 +1,15 @@
 `timescale 1ns/1ps
 
-// The real translated VHDL state sequencer drives the real mailbox and MBC5
+// The real translated VHDL state sequencer drives the real mailbox and mapper
 // bridge. Game RAM uses synchronous byte ports; the backing store and physical
 // cartridge are independent models. No game ROM or commercial save is needed.
 // USE_MANAGER=1 also exercises the board's actual edge-buffered request manager
 // and its 0x3800000 state address. USE_MANAGER=0 retains direct engine coverage.
-module snapshot_mbc5_system_tb #(parameter RAM_CODE = 3, parameter USE_MANAGER = 0);
+module snapshot_mbc5_system_tb #(parameter RAM_CODE = 3, parameter USE_MANAGER = 0, parameter MBC1 = 0);
     localparam RAM_BYTES = RAM_CODE == 3 ? 32768 : 8192;
     localparam WORDS = RAM_CODE == 3 ? 10341 : 7269;
-    localparam [63:0] IDENTITY = {16'h1b03, RAM_CODE[7:0], 40'h7d12345678};
-    localparam [15:0] EXPECTED_MAPPER = {1'b0, 2'b00, 4'd3, 9'h18e};
+    localparam [63:0] IDENTITY = {MBC1 ? 16'h0303 : 16'h1b03, RAM_CODE[7:0], 40'h7d12345678};
+    localparam [15:0] EXPECTED_MAPPER = MBC1 ? 16'h4600 : {1'b0, 2'b00, 4'd3, 9'h18e};
 
     reg clk = 0, mem_clk = 0, reset = 1, supported = 1;
     always #5 clk = ~clk;
@@ -117,10 +117,13 @@ module snapshot_mbc5_system_tb #(parameter RAM_CODE = 3, parameter USE_MANAGER =
     reg [8:0] physical_rom = 1;
     reg [3:0] physical_bank = 0;
     reg physical_enabled = 0;
+    reg physical_mode = 0;
     reg [7:0] cart_ram [0:32767];
-    wire [14:0] physical_addr = RAM_CODE == 3 ? {physical_bank[1:0], cart_addr[12:0]} :
+    wire [14:0] physical_addr = RAM_CODE == 3 && (!MBC1 || physical_mode) ? {physical_bank[1:0], cart_addr[12:0]} :
                                                                {2'b00, cart_addr[12:0]};
-    wire [15:0] physical_mapper = {physical_enabled, 2'b00, physical_bank, physical_rom};
+    wire [15:0] physical_mapper = MBC1 ?
+        {physical_enabled,physical_mode,3'b000,physical_bank[1:0],4'b0000,physical_rom[4:0]} :
+        {physical_enabled, 2'b00, physical_bank, physical_rom};
     wire [7:0] cart_in = !cart_cs_n && !cart_read_n && cart_input_dir && physical_enabled ?
                         cart_ram[physical_addr] : 8'hff;
     integer cart_writes = 0;
@@ -131,6 +134,13 @@ module snapshot_mbc5_system_tb #(parameter RAM_CODE = 3, parameter USE_MANAGER =
                 cart_ram[physical_addr] = cart_data;
                 if (take_bus) cart_writes = cart_writes + 1;
             end
+        end else if (MBC1) begin
+            case (cart_addr[15:13])
+                0: physical_enabled = cart_data[3:0] == 4'ha;
+                1: physical_rom = {4'b0000,cart_data[4:0]};
+                2: physical_bank = {2'b00,cart_data[1:0]};
+                3: physical_mode = cart_data[0];
+            endcase
         end else case (cart_addr[15:12])
             0,1: physical_enabled = cart_data[3:0] == 4'ha;
             2: physical_rom[7:0] = cart_data;
@@ -140,7 +150,7 @@ module snapshot_mbc5_system_tb #(parameter RAM_CODE = 3, parameter USE_MANAGER =
     end
 
     snapshot_mbc5 bridge(
-        .clk(clk), .reset(reset), .enabled(1'b1), .ram_code(RAM_CODE[7:0]),
+        .clk(clk), .reset(reset), .enabled(1'b1), .mbc1(MBC1 != 0), .ram_code(RAM_CODE[7:0]),
         .active(active), .abort(abort_state), .restart_core(restart),
         .core_req(raw_req), .core_read(raw_read),
         .core_addr(raw_addr), .core_out(raw_out), .core_done(raw_done), .core_in(core_in),
@@ -215,8 +225,15 @@ module snapshot_mbc5_system_tb #(parameter RAM_CODE = 3, parameter USE_MANAGER =
         repeat (4) tick(); game_input_dir = 1;
     endtask
     task set_mapper(input [8:0] rom, input [3:0] bank, input bit enabled);
-        game_write(16'h2000, rom[7:0]); game_write(16'h3000, {7'd0, rom[8]});
-        game_write(16'h4000, {4'd0, bank}); game_write(16'h0000, enabled ? 8'h1a : 8'h00);
+        if (MBC1) begin
+            game_write(16'h2000, {3'd0,rom[4:0]});
+            game_write(16'h4000, {6'd0,bank[1:0]});
+            game_write(16'h6000, 8'd1);
+        end else begin
+            game_write(16'h2000, rom[7:0]); game_write(16'h3000, {7'd0, rom[8]});
+            game_write(16'h4000, {4'd0, bank});
+        end
+        game_write(16'h0000, enabled ? 8'h1a : 8'h00);
     endtask
     task command(input [6:0] address, input [79:0] data, input [79:0] expected);
         reg last;
@@ -287,7 +304,7 @@ module snapshot_mbc5_system_tb #(parameter RAM_CODE = 3, parameter USE_MANAGER =
         repeat (8) tick(); reset = 0; repeat (8) tick();
         for (int i = 0; i < 64; i++) live_regs[i] = register_pattern(i);
         // Capture while RAM is disabled and a non-default 9-bit bank is selected.
-        set_mapper(9'h18e, 4'd3, 1'b0);
+        set_mapper(MBC1 ? 9'h000 : 9'h18e, 4'd3, 1'b0);
         if (physical_mapper !== EXPECTED_MAPPER || bridge.current_mapper !== EXPECTED_MAPPER)
             $fatal(1, "Guest mapper writes not tracked");
         control(1, 1); finish_operation(); control(0, 0);
@@ -332,7 +349,7 @@ module snapshot_mbc5_system_tb #(parameter RAM_CODE = 3, parameter USE_MANAGER =
             $fatal(1, "Cancelled capture resumed unsafely or wrote cartridge RAM");
         if (USE_MANAGER && (manager_saves != 2 || manager_loads != 1))
             $fatal(1, "Manager did not emit exactly two captures and one restore");
-        $display("PASS: joint real state engine + MBC5 + mailbox, %0d-byte physical RAM, all core memories and mapper before first CPU enable, safe capture abort (%0d backing requests, manager=%0d)", RAM_BYTES, backing_requests, USE_MANAGER);
+        $display("PASS: joint real state engine + MBC%0d + mailbox, %0d-byte physical RAM, all core memories and mapper before first CPU enable, safe capture abort (%0d backing requests, manager=%0d)", MBC1 ? 1 : 5, RAM_BYTES, backing_requests, USE_MANAGER);
         $finish;
     end
     initial begin #40000000; $fatal(1, "Joint MBC5 snapshot timeout"); end

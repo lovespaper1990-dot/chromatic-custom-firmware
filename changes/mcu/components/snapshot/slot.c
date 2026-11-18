@@ -20,6 +20,16 @@ uint16_t snap_word_count(const uint8_t id[SNAP_ID_BYTES])
 {
     // Core format includes 512 placeholder bytes even when RAM is absent.
     if (!id[0] && !id[1] && !id[2]) return SNAP_WORDS;
+    if (id[0] >= 1 && id[0] <= 3) {
+        // Standard MBC1: large-ROM wiring has only one 8 KiB RAM bank.
+        if (id[1] > 6) return 0;
+        if (id[2] == 0) return SNAP_WORDS;
+        if (id[0] != 1) {
+            if (id[2] == 2) return 6245 + 8192 / SNAP_WORD_BYTES;
+            if (id[2] == 3 && id[1] <= 4) return 6245 + 32768 / SNAP_WORD_BYTES;
+        }
+        return 0;
+    }
     if (id[1] > 8) return 0; // MBC5 has a nine-bit ROM bank register.
     if (id[0] == 0x19 && id[2] == 0) return SNAP_WORDS;
     if (id[0] == 0x1a || id[0] == 0x1b) {

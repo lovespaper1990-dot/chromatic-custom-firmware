@@ -43,7 +43,43 @@ static snap_result_t restore(uint16_t i, uint8_t word[8]) {
     for (int j=0; j<8; ++j) assert(word[j] == byte_at(i, j));
     return SNAP_OK;
 }
+static void mbc1_geometry(void) {
+    static const struct { uint8_t mapper, rom, ram; uint16_t words; } cases[] = {
+        {1,0,0,6309}, {1,6,0,6309}, {2,3,0,6309}, {3,6,0,6309},
+        {2,0,2,7269}, {3,6,2,7269}, {2,4,3,10341}, {3,4,3,10341},
+        {1,4,2,0}, {1,4,3,0}, {2,5,3,0}, {3,6,3,0},
+        {1,7,0,0}, {2,7,2,0}, {3,8,3,0},
+        {2,2,1,0}, {3,4,1,0}, {3,4,4,0}, {3,4,5,0}
+    };
+    for (size_t i = 0; i < sizeof cases / sizeof *cases; ++i) {
+        uint8_t id[8] = {cases[i].mapper,cases[i].rom,cases[i].ram};
+        assert(snap_word_count(id) == cases[i].words);
+    }
+
+    // No battery or cartridge save feature is required for a core snapshot.
+    static const uint8_t geometries[][3] = {
+        {1,6,0}, {2,3,0}, {3,3,0}, {2,6,2}, {3,4,3}
+    };
+    for (size_t i = 0; i < sizeof geometries / sizeof *geometries; ++i) {
+        char temp[] = "/tmp/chromatic-mbc1-slot-XXXXXX";
+        char *dir = mkdtemp(temp);
+        uint8_t id[8] = {0,0,0,0x5a,0x90,0,0,(uint8_t)(i+1)};
+        memcpy(id, geometries[i], 3);
+        assert(dir);
+        pattern = 17 + (int)i;
+        restored = 0;
+        assert(snap_slot(dir, id, false, capture) == SNAP_OK);
+        assert(snap_slot(dir, id, true, restore) == SNAP_OK && restored == snap_word_count(id));
+        char file[64];
+        snprintf(file, sizeof file, "%s/900000%02X.S0", dir, (unsigned)i+1);
+        FILE *f = fopen(file, "rb");
+        assert(f && !fseek(f, 0, SEEK_END));
+        assert(ftell(f) == 16 + (long)snap_word_count(id)*8 + 4 && !fclose(f));
+        assert(!unlink(file) && !rmdir(dir));
+    }
+}
 int main(void) {
+    mbc1_geometry();
     char temp[] = "/tmp/chromatic-slot-XXXXXX";
     char *dir = mkdtemp(temp);
     uint8_t id[8] = {0,0,0,0x88,1,2,3,4};

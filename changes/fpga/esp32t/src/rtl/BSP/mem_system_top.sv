@@ -4,6 +4,7 @@ module mem_system_top #(parameter ISSIMU=0)
 (
     input snap_request, input [13:0] snap_index, input snap_read,
     input [63:0] snap_out, output [63:0] snap_in, output snap_ack,
+    input snap_spi_miso, input snap_spi_drive,
     input               xClk,
     input               fClk,
     input               hClk,
@@ -155,6 +156,7 @@ module mem_system_top #(parameter ISSIMU=0)
     wire [15:0] qData;
     wire [31:0] qAddress;
     wire qDataValid;
+    wire qOsdWrite;
 
     QSPI_Slave u_QSPI_Slave(
         .QSPI_CLK(QSPI_CLK),
@@ -172,7 +174,10 @@ module mem_system_top #(parameter ISSIMU=0)
         .qMenuInit(qMenuInit),
         .qDataValid(qDataValid),
         .qData(qData),
-        .qAddress(qAddress)
+        .qAddress(qAddress),
+        .qOsdWrite(qOsdWrite),
+        .snapshot_miso(snap_spi_miso),
+        .snapshot_drive(snap_spi_drive)
     );
 
     mm_burst_write u_mm_burst_write(
@@ -180,6 +185,7 @@ module mem_system_top #(parameter ISSIMU=0)
         .QSPI_CS(QSPI_CS),
         .qAddress(qAddress),
         .qDataValid(qDataValid),
+        .qOsdWrite(qOsdWrite),
         .qData(qData),
 
         .xClk(xClk),

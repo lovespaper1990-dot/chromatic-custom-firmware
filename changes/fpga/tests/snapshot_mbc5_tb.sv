@@ -31,7 +31,7 @@ module snapshot_mbc5_tb;
     wire [7:0] cart_in=!bus_read_n && !bus_cs_n && ram_enable && bus_input_dir ? ram[ram_address] : 8'hxx;
     integer writes=0, mapper_writes=0;
     always #5 clk=~clk;
-    snapshot_mbc5 dut(.clk(clk),.reset(reset),.enabled(enabled),.ram_code(ram_code),
+    snapshot_mbc5 dut(.clk(clk),.reset(reset),.enabled(enabled),.mbc1(1'b0),.ram_code(ram_code),
         .active(active),.abort(abort_state),.restart_core(restart_core),.core_req(core_req),.core_read(core_read),
         .core_addr(core_addr),.core_out(core_out),.core_done(core_done),.core_in(core_in),
         .mem_req(mem_req),.mem_read(mem_read),.mem_addr(mem_addr),.mem_out(mem_out),

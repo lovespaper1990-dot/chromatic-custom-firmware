@@ -12,7 +12,8 @@ module snapshot_mbc5_bus_tb;
     snapshot_mbc5_bus dut(clk,ready,start,wr,addr,out,cart_in,busy,done,result,
                           cart_a,cart_d,rd_n,wr_n,cs_n,input_dir);
     wire [15:0] mapper_state;
-    snapshot_mbc5_mapper mirror(clk,ready,wr_n,cart_a,cart_d,mapper_state);
+    snapshot_mbc5_mapper mirror(.clk(clk),.cart_ready(ready),.mbc1(1'b0),
+        .write_n(wr_n),.address(cart_a),.data(cart_d),.mapper_state(mapper_state));
     always #5 clk=~clk;
     always @(posedge wr_n) if (ready && busy) begin
         if (input_dir || !rd_n) $fatal(1,"unstable data on cartridge write");

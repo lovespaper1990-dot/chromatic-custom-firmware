@@ -22,6 +22,8 @@
         <File path="src/rtl/BSP/mm_burst_write.v" type="file.verilog" enable="1"/>
         <File path="src/rtl/BSP/polling_master_8_16.v" type="file.verilog" enable="1"/>
         <File path="src/rtl/BSP/qspi_slave.v" type="file.verilog" enable="1"/>
+        <File path="src/rtl/BSP/snapshot_spi_buffer.v" type="file.verilog" enable="1"/>
+        <File path="src/rtl/BSP/snapshot_block_transfer.v" type="file.verilog" enable="1"/>
         <File path="src/rtl/BSP/system_monitor.sv" type="file.verilog" enable="1"/>
         <File path="src/rtl/BSP/system_monitor_arbiter.sv" type="file.verilog" enable="1"/>
         <File path="src/rtl/BSP/tlv320_init.v" type="file.verilog" enable="1"/>

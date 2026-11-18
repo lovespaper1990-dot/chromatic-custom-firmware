@@ -9,6 +9,7 @@ module headphone_audio_tb;
     reg [15:0] left = 16'h1234, right = 16'hbaad;
     QSPI_Slave dut(.QSPI_CLK(sclk), .QSPI_CS(cs), .QSPI_MOSI(mosi),
         .QSPI_MISO(miso), .QSPI_HD(1'b0), .QSPI_WP(1'b0),
+        .snapshot_miso(1'b0), .snapshot_drive(1'b0),
         .AUDIO_ENABLE(enabled), .WHEEL(wheel), .LEFT(left), .RIGHT(right), .AUD_MCLK(mclk),
         .qMenuInit(osd_init), .qDataValid(osd_valid));
 

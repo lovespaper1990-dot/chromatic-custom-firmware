@@ -1,0 +1,11 @@
+--- a/fpga/esp32t/src/rtl/EMU/emu_system_top.v
++++ b/fpga/esp32t/src/rtl/EMU/emu_system_top.v
+@@ -382,7 +382,7 @@
+         .cart_write_n(state_cart_wr), .cart_cs_n(state_cart_cs), .cart_input_dir(state_cart_input_dir)
+     );
+ 
+-    snapshot_control #(.BULK(1)) u_snapshot_control (
++    snapshot_control #(.BULK(0)) u_snapshot_control (
+         .clk(hclk), .reset(snapshot_power_reset), .supported(snap_supported && !gbreset && !boot_rom_enabled),
+         .identity(snap_identity), .cmd_toggle(snap_cmd_toggle), .cmd(snap_cmd),
+         .cmd_data(snap_cmd_data), .reply_toggle(snap_reply_toggle), .reply(snap_reply),

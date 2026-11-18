@@ -58,6 +58,32 @@ with tempfile.TemporaryDirectory() as temp:
             params = [f"-Psnapshot_tb.RAM_CODE={ram_code}"] if ram_code else []
             run(ivl + params + ["-s", name, "-o", "model", tests / (name + ".sv"), *sources], temp, True)
             run(vvp + ["model"], temp)
+    bulk_sources = [rtl / "EMU/snapshot_control.v", rtl / "BSP/snapshot_block_transfer.v",
+                    rtl / "BSP/snapshot_spi_buffer.v", rtl / "BSP/qspi_slave.v"]
+    for code in (0, 3):
+        run(ivl + [f"-Psnapshot_bulk_tb.RAM_CODE={code}", "-s", "snapshot_bulk_tb",
+                   "-o", "bulk", tests / "snapshot_bulk_tb.sv", *bulk_sources], temp, True)
+        run(vvp + ["bulk"], temp)
+    for ram_code, rom_bits in ((3, 5), (2, 7), (0, 2), (0, 4), (0, 6), (0, 7)):
+        run(ivl + [f"-Psnapshot_mbc1_tb.RAM_CODE={ram_code}",
+                   f"-Psnapshot_mbc1_tb.ROM_BITS={rom_bits}",
+                   "-s", "snapshot_mbc1_tb", "-o", "mbc1",
+                   tests / "snapshot_mbc1_tb.sv",
+                   *[rtl / "EMU" / filename for filename in
+                     ("snapshot_mbc5.v", "snapshot_mbc5_bus.v", "snapshot_mbc5_mapper.v")]],
+            temp, True)
+        run(vvp + ["mbc1"], temp)
+    for rom_code, ram_code, mapper, multicart, alias in (
+        (0, 0, 1, 0, 0), (1, 0, 1, 0, 0), (3, 0, 2, 0, 0),
+        (4, 3, 3, 0, 0), (5, 2, 3, 0, 0), (6, 2, 3, 0, 0),
+        (5, 2, 3, 1, 0), (5, 2, 3, 0, 1),
+    ):
+        run(ivl + [f"-Psnapshot_cart_mbc1_tb.{key}={value}" for key, value in
+                   zip(("ROM_CODE", "RAM_CODE", "MAPPER", "MBC1M", "ALIAS_LOGO"),
+                       (rom_code, ram_code, mapper, multicart, alias))]
+            + ["-s", "snapshot_cart_mbc1_tb", "-o", "probe_mbc1",
+               tests / "snapshot_cart_mbc1_tb.sv", rtl / "EMU/snapshot_cart.v"], temp, True)
+        run(vvp + ["probe_mbc1"], temp)
     # ROM-only terminal CRC drains without starting another physical read.
     run(ivl + ["-Psnapshot_cart_mbc5_tb.ROM_ONLY=1", "-s", "snapshot_cart_mbc5_tb",
                "-o", "rom_only", tests / "snapshot_cart_mbc5_tb.sv",
@@ -112,17 +138,19 @@ with tempfile.TemporaryDirectory() as temp:
     # Joint save/load with the real state sequencer, physical MBC5 RAM bridge,
     # mailbox and independently clocked variable-latency backing memory. The
     # manager variants also exercise edge buffering and the board slot base.
-    for use_manager in (0, 1):
-        for ram_code in (2, 3):
-            run(ivl + [f"-Psnapshot_mbc5_system_tb.RAM_CODE={ram_code}",
-                       f"-Psnapshot_mbc5_system_tb.USE_MANAGER={use_manager}",
-                       "-s", "snapshot_mbc5_system_tb", "-o", "mbc5_system",
-                       tests / "snapshot_mbc5_system_tb.sv",
-                       Path(temp) / "gb_savestates.v", Path(temp) / "speedcontrol.v", manager,
-                       *[rtl / "EMU" / filename for filename in
-                         ("snapshot_mbc5.v", "snapshot_mbc5_bus.v", "snapshot_mbc5_mapper.v",
-                          "snapshot_control.v")]], temp, True)
-            run(vvp + ["mbc5_system"], temp)
+    for mbc1 in (0, 1):
+        for use_manager in (0, 1):
+            for ram_code in (2, 3):
+                run(ivl + [f"-Psnapshot_mbc5_system_tb.RAM_CODE={ram_code}",
+                           f"-Psnapshot_mbc5_system_tb.USE_MANAGER={use_manager}",
+                           f"-Psnapshot_mbc5_system_tb.MBC1={mbc1}",
+                           "-s", "snapshot_mbc5_system_tb", "-o", "mbc5_system",
+                           tests / "snapshot_mbc5_system_tb.sv",
+                           Path(temp) / "gb_savestates.v", Path(temp) / "speedcontrol.v", manager,
+                           *[rtl / "EMU" / filename for filename in
+                             ("snapshot_mbc5.v", "snapshot_mbc5_bus.v", "snapshot_mbc5_mapper.v",
+                              "snapshot_control.v")]], temp, True)
+                run(vvp + ["mbc5_system"], temp)
     # The USB top contains vendor syntax outside the Icarus subset. Retain
     # its actual pin declaration to check the board's standby wiring.
     usb_ports = re.search(r"^module usbuvcuart_top\b.*?^\);", usb_source, re.M | re.S)

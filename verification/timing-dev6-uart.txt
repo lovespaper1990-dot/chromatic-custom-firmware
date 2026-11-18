@@ -1,0 +1,7 @@
+GW5A-25A, Map2/Place1/Route0/fan60, original constraints.
+UART fallback build with the one-line dev6-uart-build.patch applied.
+All nets routed. No setup or hold violations.
+Worst setup +0.148 ns, hold +0.134 ns, recovery +0.095 ns, removal +0.258 ns, pulse +1.958 ns.
+58044 timing paths, 35237 endpoints. Structural snapshot guard passed.
+BIN SHA256 e185e69411489f0246b5d0fa3aa5dd9e9415593907b7e27eb12c8fde3b4fa2a3.
+Offline build. No hardware testing in this session.

@@ -7,6 +7,8 @@ module emu_system_top
     output [63:0] snap_out, input [63:0] snap_in, input snap_ack,
     input snap_cmd_toggle, input [6:0] snap_cmd, input [79:0] snap_cmd_data,
     output snap_reply_toggle, output [79:0] snap_reply,
+    input snap_spi_clk, input snap_spi_cs, input snap_spi_mosi,
+    output snap_spi_miso, output snap_spi_drive,
     input               hclk,
     input               pclk,
     input               fclk, 
@@ -179,8 +181,13 @@ module emu_system_top
     reg gbreset;
     wire DMA_on;
     wire cart_frozen;
-    wire mbc5_enabled = POWER_GOOD && (snap_identity[63:56] == 8'h19 ||
-                         snap_identity[63:56] == 8'h1a || snap_identity[63:56] == 8'h1b);
+    wire mbc1_mapper = snap_identity[63:56] == 8'h01 || snap_identity[63:56] == 8'h02 ||
+                       snap_identity[63:56] == 8'h03;
+    // The scanner excludes unsupported geometries and ambiguous multicarts.
+    // Mapper type alone must never bypass that admission decision.
+    wire snapshot_mapper_enabled = POWER_GOOD && snap_supported && (mbc1_mapper ||
+                         snap_identity[63:56] == 8'h19 || snap_identity[63:56] == 8'h1a ||
+                         snap_identity[63:56] == 8'h1b);
     wire snapshot_cart_owner;
     wire [15:0] game_cart_a;
     wire [7:0] game_cart_out;
@@ -363,7 +370,7 @@ module emu_system_top
     wire [63:0] bridge_out;
     snapshot_mbc5 u_snapshot_mbc5 (
         .clk(hclk), .reset(snapshot_power_reset || !POWER_GOOD),
-        .enabled(mbc5_enabled), .ram_code(snap_identity[47:40]),
+        .enabled(snapshot_mapper_enabled), .mbc1(mbc1_mapper), .ram_code(snap_identity[47:40]),
         .active(ss_active), .abort(ss_abort), .restart_core(ss_restart),
         .core_req(SAVE_out_ena), .core_read(SAVE_out_rnw), .core_addr(SAVE_out_Adr),
         .core_out(SAVE_out_Din), .core_done(SAVE_out_done), .core_in(SAVE_out_Dout),
@@ -375,7 +382,7 @@ module emu_system_top
         .cart_write_n(state_cart_wr), .cart_cs_n(state_cart_cs), .cart_input_dir(state_cart_input_dir)
     );
 
-    snapshot_control u_snapshot_control (
+    snapshot_control #(.BULK(1)) u_snapshot_control (
         .clk(hclk), .reset(snapshot_power_reset), .supported(snap_supported && !gbreset && !boot_rom_enabled),
         .identity(snap_identity), .cmd_toggle(snap_cmd_toggle), .cmd(snap_cmd),
         .cmd_data(snap_cmd_data), .reply_toggle(snap_reply_toggle), .reply(snap_reply),
@@ -387,7 +394,9 @@ module emu_system_top
         .mem_ack(snap_ack), .mem_in(snap_in),
         .debug_flags({ss_save, ss_load, ss_active, ss_busy, SAVE_out_ena,
                       sleep_savestate, cart_frozen, ce, ce_2x, rd, wr, DMA_on,
-                      game_cart_wr, game_cart_input_dir, standby, boot_rom_enabled})
+                      game_cart_wr, game_cart_input_dir, standby, boot_rom_enabled}),
+        .spi_clk(snap_spi_clk), .spi_cs(snap_spi_cs), .spi_mosi(snap_spi_mosi),
+        .spi_miso(snap_spi_miso), .spi_drive(snap_spi_drive)
     );
 
 

@@ -470,11 +470,13 @@ module top #(
     wire snap_cmd_toggle, snap_reply_toggle;
     wire [79:0] snap_reply, snap_cmd_data;
     wire [6:0] snap_cmd;
+    wire snap_spi_miso, snap_spi_drive;
     mem_system_top #(ISSIMU)
     u_mem_system_top
     (
         .snap_request(snap_request), .snap_index(snap_index), .snap_read(snap_read),
         .snap_out(snap_out), .snap_in(snap_in), .snap_ack(snap_ack),
+        .snap_spi_miso(snap_spi_miso), .snap_spi_drive(snap_spi_drive),
         .xClk(xClk),
         .fClk(fClk),
         .hClk(hClk),
@@ -636,6 +638,8 @@ module top #(
         .snap_out(snap_out), .snap_in(snap_in), .snap_ack(snap_ack),
         .snap_cmd_toggle(snap_cmd_toggle), .snap_cmd(snap_cmd), .snap_cmd_data(snap_cmd_data),
         .snap_reply_toggle(snap_reply_toggle), .snap_reply(snap_reply),
+        .snap_spi_clk(QSPI_CLK), .snap_spi_cs(QSPI_CS), .snap_spi_mosi(QSPI_MOSI),
+        .snap_spi_miso(snap_spi_miso), .snap_spi_drive(snap_spi_drive),
 
         .customPaletteEna(paletteBGIn[63]),
         .paletteOff(system_control[12]),

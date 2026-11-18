@@ -114,7 +114,14 @@ module snapshot_uart_tb;
         send_frame('h20,1,8'h03,0);
         if (cmd_toggle!==0 || cmd!='h20 || received[7:0]!=3) $fatal(1,"bad control packet");
         response=80'hfff10000007ddd608109; reply_toggle=0; wait(packets==2);
-        $display("PASS: in-game Bluetooth wheel packets, UART/telemetry arbitration, CRC, length, control and opaque word byte order");
+        send_frame('h23,3,32'h01008000,0);
+        send_frame('h24,4,32'h01008000,1);
+        if (cmd_toggle!==0) $fatal(1,"bulk request without exact length and CRC accepted");
+        send_frame('h23,4,32'h01008000,0);
+        if (cmd_toggle!==1 || cmd!='h23 || received[31:0]!==32'h01008000) $fatal(1,"bad bulk prepare");
+        send_frame('h24,4,32'h01008000,0);
+        if (cmd_toggle!==0 || cmd!='h24 || received[31:0]!==32'h01008000) $fatal(1,"bad bulk commit");
+        $display("PASS: Bluetooth wheel packets, UART arbitration, CRC/length, control, bulk command and word byte order");
         $finish;
     end
     initial begin #1000000; $fatal(1,"UART timeout"); end

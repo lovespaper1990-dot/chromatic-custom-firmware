@@ -1,0 +1,9 @@
+Final-source focused regressions
+PASS Bluetooth wheel packets and UART framing, including block prepare/commit lengths and CRC
+PASS headset stereo stream, cancellation, partial-read retry, underflow, MISO and OSD isolation
+PASS SPI bulk 6309 words each way, partial final block, CRC/truncation/replay/ejection protection, full restore gate
+PASS SPI bulk 10341 words each way, partial final block, CRC/truncation/replay/ejection protection, full restore gate
+PASS 10341-word SPI test also using Gowin GW5A's DPB simulation primitive
+PASS production MCU SPI cache and CRC in three geometries, ordered commit, legacy selection and tick wrap
+PASS ESP-IDF 5.3 dev6-test build; paired image remains within app partition
+Actual handheld duration and cartridge compatibility await physical testing.

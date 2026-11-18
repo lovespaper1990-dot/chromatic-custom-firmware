@@ -85,7 +85,8 @@ module system_monitor #(parameter STANDBY_HOLD_TICKS = 150) (
         if (!reset && rx_data_val &&
             ((rx_address == 7'h20 && rx_length == 1) ||
              (rx_address == 7'h21 && rx_length == 2) ||
-             (rx_address == 7'h22 && rx_length == 10))) begin
+             (rx_address == 7'h22 && rx_length == 10) ||
+             ((rx_address == 7'h23 || rx_address == 7'h24) && rx_length == 4))) begin
             snap_cmd <= rx_address;
             snap_cmd_data <= rx_data;
             snap_cmd_toggle <= ~snap_cmd_toggle;
