@@ -21,7 +21,30 @@ enum { RX_BYTES = 10, CONTROL = 0x20, READ_WORD = 0x21, WRITE_WORD = 0x22,
        PREPARE_BLOCK = 0x23, COMMIT_BLOCK = 0x24, BLOCK_WORDS = 128 };
 enum { STATUS, CAPTURE, RESTORE, IDENTITY, DIAGNOSTICS, CAPABILITY };
 static QueueHandle_t replies;
-static atomic_bool busy;
+enum { MSG_SAVING = SNAP_HW + 1, MSG_LOADING, MSG_SAVED, MSG_RESTORED, MSG_NO_SD, MSG_COUNT };
+static const char *const messages[MSG_COUNT] = {
+    [SNAP_OK] = "A: Save\nB: Load", [SNAP_EMPTY] = "No snapshot", [SNAP_INVALID] = "Bad file",
+    [SNAP_IO] = "Card error", [SNAP_LINK] = "FPGA timeout", [SNAP_UNSUPPORTED] = "Unsupported",
+    [SNAP_WRONG] = "Wrong game", [SNAP_BUSY] = "Busy", [SNAP_HW] = "FPGA error",
+    [MSG_SAVING] = "Saving...", [MSG_LOADING] = "Loading...", [MSG_SAVED] = "Saved",
+    [MSG_RESTORED] = "Restored", [MSG_NO_SD] = "No SD card"
+};
+// Publish the busy flag, target slot and message in a single state change.
+// Zero initializes to the help text for slot 1.
+static atomic_uint operation;
+static unsigned operation_state(unsigned slot_number, unsigned message)
+{
+    return (slot_number - 1) * MSG_COUNT + message;
+}
+static unsigned operation_slot(unsigned state)
+{
+    return state / MSG_COUNT + 1;
+}
+static bool operation_busy(unsigned state)
+{
+    unsigned message = state % MSG_COUNT;
+    return message == MSG_SAVING || message == MSG_LOADING;
+}
 static atomic_uint transferred;
 static atomic_uint word_count = SNAP_WORDS;
 static _Atomic(const char *) phase = "idle";
@@ -29,7 +52,6 @@ _Static_assert(sizeof(TickType_t) == sizeof(uint32_t), "Snapshot timing requires
 static _Atomic(TickType_t) started_tick, phase_started_tick;
 static atomic_uint elapsed_ms, phase_elapsed_ms;
 static atomic_uint fpga_result;
-static _Atomic(const char *) message = "A: Save\nB: Load";
 static atomic_uint sd_mount_error = ESP_ERR_INVALID_STATE;
 static atomic_uint sd_last_command, sd_last_error;
 static atomic_bool sd_responded;
@@ -90,11 +112,12 @@ static esp_err_t sd_transaction(int slot, sdmmc_command_t *command)
 
 void Snapshot_PrintDiagnostics(void)
 {
-    const char *status = Snapshot_Status();
+    unsigned state = atomic_load(&operation);
+    const char *status = messages[state % MSG_COUNT];
     if (strchr(status, '\n')) status = "Idle";
-    printf("{\"snapshot\":\"%s\",\"busy\":%d,\"progress\":%u,\"words\":%u,\"total\":%u,\"phase\":\"%s\",\"elapsed_ms\":%u,\"phase_elapsed_ms\":%u,\"fpga_result\":%u,"
+    printf("{\"snapshot\":\"%s\",\"slot\":%u,\"busy\":%d,\"progress\":%u,\"words\":%u,\"total\":%u,\"phase\":\"%s\",\"elapsed_ms\":%u,\"phase_elapsed_ms\":%u,\"fpga_result\":%u,"
            "\"sd_mount\":\"%s\",\"sd_command\":%u,\"sd_error\":\"%s\",\"sd_responded\":%d}\n",
-           status, Snapshot_Busy(), Snapshot_Percent(), atomic_load(&transferred),
+           status, operation_slot(state), operation_busy(state), Snapshot_Percent(), atomic_load(&transferred),
            atomic_load(&word_count), atomic_load(&phase),
            (unsigned)Snapshot_ElapsedMs(), (unsigned)Snapshot_PhaseElapsedMs(), atomic_load(&fpga_result),
            esp_err_to_name(atomic_load(&sd_mount_error)), atomic_load(&sd_last_command),
@@ -107,11 +130,11 @@ void Snapshot_Init(void)
 }
 void Snapshot_OnReply(const uint8_t payload[10])
 {
-    if (replies && atomic_load(&busy)) xQueueSend(replies, payload, 0);
+    if (replies && Snapshot_Busy()) xQueueSend(replies, payload, 0);
 }
 bool Snapshot_Busy(void)
 {
-    return atomic_load(&busy);
+    return operation_busy(atomic_load(&operation));
 }
 unsigned Snapshot_Percent(void)
 {
@@ -119,7 +142,16 @@ unsigned Snapshot_Percent(void)
 }
 const char *Snapshot_Status(void)
 {
-    return atomic_load(&message);
+    return messages[atomic_load(&operation) % MSG_COUNT];
+}
+unsigned Snapshot_OperationSlot(void)
+{
+    return operation_slot(atomic_load(&operation));
+}
+const char *Snapshot_StatusForSlot(unsigned slot_number)
+{
+    unsigned state = atomic_load(&operation);
+    return messages[operation_slot(state) == slot_number ? state % MSG_COUNT : SNAP_OK];
 }
 
 /* The stock UART parser validates the CRC before putting a response in replies.
@@ -166,11 +198,16 @@ static uint16_t block_words(uint16_t first)
 }
 static uint16_t block_crc16(const uint8_t *bytes, size_t length)
 {
+    // Four MSB-first CCITT steps per lookup, using 32 bytes of read-only data.
+    static const uint16_t nibble[16] = {
+        0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50a5, 0x60c6, 0x70e7,
+        0x8108, 0x9129, 0xa14a, 0xb16b, 0xc18c, 0xd1ad, 0xe1ce, 0xf1ef
+    };
     uint16_t crc = 0xffff;
     while (length--) {
         crc ^= (uint16_t)*bytes++ << 8;
-        for (unsigned bit = 0; bit < 8; ++bit)
-            crc = crc & 0x8000 ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
+        crc = (uint16_t)(crc << 4) ^ nibble[crc >> 12];
+        crc = (uint16_t)(crc << 4) ^ nibble[crc >> 12];
     }
     return crc;
 }
@@ -216,16 +253,21 @@ static snap_result_t fetch_block(uint16_t first)
     snap_result_t rc = block_control(PREPARE_BLOCK, false, first);
     if (rc != SNAP_OK) return rc;
     size_t bytes = count * SNAP_WORD_BYTES;
-    if (!spi_transfer(true, block_packet, bytes + 2)) return SNAP_LINK;
-    uint16_t received_crc = (uint16_t)block_packet[bytes] << 8 | block_packet[bytes + 1];
-    if (received_crc != block_crc16(block_packet, bytes)) {
-        printf("SNAPSHOT block CRC error index=%u words=%u\n", first, count);
-        return SNAP_LINK;
+    // The prepared buffer is read-only until the next mailbox command.
+    // A fresh CS frame can safely read it again after a failed transfer.
+    for (unsigned attempt = 0; attempt < 2; ++attempt) {
+        if (spi_transfer(true, block_packet, bytes + 2)) {
+            uint16_t received_crc = (uint16_t)block_packet[bytes] << 8 | block_packet[bytes + 1];
+            if (received_crc == block_crc16(block_packet, bytes)) {
+                block_first = first;
+                block_count = count;
+                block_cached = true;
+                return SNAP_OK;
+            }
+        }
+        printf("SNAPSHOT block read failed index=%u attempt=%u\n", first, attempt + 1);
     }
-    block_first = first;
-    block_count = count;
-    block_cached = true;
-    return SNAP_OK;
+    return SNAP_LINK;
 }
 
 static snap_result_t identity(uint8_t id[SNAP_ID_BYTES])
@@ -268,13 +310,22 @@ static void print_capture_diagnostics(void)
 static snap_result_t command_wait(uint8_t op)
 {
     TickType_t start = xTaskGetTickCount();
+    bool retried_poll = false;
     do {
         uint8_t prefix[] = {0xff, 0xf0, op}, reply[RX_BYTES];
         snap_result_t rc = exchange(CONTROL, &op, 1, prefix, sizeof prefix, reply);
         if (rc != SNAP_OK) {
             printf("SNAPSHOT control op=%u link_result=%u\n",op,rc);
+            // Once the state-changing command was acknowledged, a lost
+            // status reply can be polled again within the same deadline.
+            if (op == STATUS && rc == SNAP_LINK && !retried_poll) {
+                retried_poll = true;
+                vTaskDelay(pdMS_TO_TICKS(20));
+                continue;
+            }
             return rc;
         }
+        retried_poll = false;
         atomic_store(&fpga_result, reply[3]);
         if (reply[3] != 1) {
             printf("SNAPSHOT control op=%u result=%u elapsed_ms=%u\n",op,reply[3],
@@ -344,9 +395,16 @@ static snap_result_t stage_word(uint16_t index, uint8_t *word)
     return rc;
 }
 
-static snap_result_t run(bool load)
+static snap_result_t check_identity(const uint8_t expected[SNAP_ID_BYTES])
 {
-    uint8_t id[SNAP_ID_BYTES], current[SNAP_ID_BYTES];
+    uint8_t current[SNAP_ID_BYTES];
+    snap_result_t rc = identity(current);
+    if (rc != SNAP_OK) return rc;
+    return memcmp(expected, current, sizeof current) == 0 ? SNAP_OK : SNAP_WRONG;
+}
+
+static snap_result_t prepare_snapshot(bool load, unsigned slot_number, uint8_t id[SNAP_ID_BYTES])
+{
     start_phase("identity");
     snap_result_t rc = identity(id);
     if (rc != SNAP_OK) return rc;
@@ -355,21 +413,34 @@ static snap_result_t run(bool load)
     rc = select_transport();
     if (rc != SNAP_OK) return rc;
     const char *dir = "/sd/SNAP";
-    if (mkdir(dir, 0777) != 0 && errno != EEXIST) return SNAP_IO;
     if (!load) {
+        if (mkdir(dir, 0777) != 0 && errno != EEXIST) return SNAP_IO;
         start_phase("capture");
         rc = command_wait(CAPTURE);
         printf("SNAPSHOT capture result=%u\n",rc);
         if (rc != SNAP_OK) return rc;
+        // Cartridge selection can change between the initial probe and capture.
+        // Check before opening a destination generation under the original ID.
+        start_phase("verify");
+        rc = check_identity(id);
+        if (rc != SNAP_OK) return rc;
     }
     start_phase(load ? "stage" : "fetch");
-    rc = snap_slot(dir, id, load, load ? stage_word : fetch_word);
+    rc = snap_slot_for_number(dir, id, slot_number, load, load ? stage_word : fetch_word);
     printf("SNAPSHOT file result=%u words=%u\n",rc,atomic_load(&transferred));
+    return rc;
+}
+
+static snap_result_t run(bool load, unsigned slot_number, sdmmc_card_t *card)
+{
+    uint8_t id[SNAP_ID_BYTES];
+    snap_result_t rc = prepare_snapshot(load, slot_number, id);
+    start_phase("unmount");
+    if (esp_vfs_fat_sdcard_unmount("/sd", card) != ESP_OK && rc == SNAP_OK) rc = SNAP_IO;
     if (rc == SNAP_OK && load) {
         start_phase("verify");
-        rc = identity(current);
+        rc = check_identity(id);
         if (rc != SNAP_OK) return rc;
-        if (memcmp(id, current, sizeof id)) return SNAP_WRONG;
         start_phase("restore");
         rc = command_wait(RESTORE);
     }
@@ -378,7 +449,9 @@ static snap_result_t run(bool load)
 
 static void worker(void *arg)
 {
-    bool load = (uintptr_t)arg != 0;
+    unsigned request = (uintptr_t)arg;
+    unsigned slot_number = operation_slot(request);
+    bool load = request % MSG_COUNT == MSG_LOADING;
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
     sd_native_transaction = host.do_transaction;
     host.do_transaction = sd_transaction;
@@ -398,36 +471,36 @@ static void worker(void *arg)
     printf("SNAPSHOT SD mount=%s command=%u error=%s responded=%d\n",
            esp_err_to_name(mount), atomic_load(&sd_last_command),
            esp_err_to_name(atomic_load(&sd_last_error)), atomic_load(&sd_responded));
-    const char *result;
+    unsigned result;
     if (mount != ESP_OK) {
         bool no_response = !atomic_load(&sd_responded);
-        result = no_response && (mount == ESP_ERR_TIMEOUT || mount == ESP_ERR_NOT_FOUND) ? "No SD card" : "Card error";
+        result = no_response && (mount == ESP_ERR_TIMEOUT || mount == ESP_ERR_NOT_FOUND) ? MSG_NO_SD : SNAP_IO;
         finish_phase(xTaskGetTickCount());
     } else {
-        snap_result_t rc = run(load);
+        snap_result_t rc = run(load, slot_number, card);
         finish_phase(xTaskGetTickCount());
-        TickType_t unmount_start = xTaskGetTickCount();
-        if (esp_vfs_fat_sdcard_unmount("/sd", card) != ESP_OK && rc == SNAP_OK) rc = SNAP_IO;
-        printf("SNAPSHOT timing phase=unmount elapsed_ms=%u\n",
-               (unsigned)ticks_elapsed_ms(xTaskGetTickCount(), unmount_start));
-        static const char *const errors[] = {
-            [SNAP_EMPTY] = "No snapshot", [SNAP_INVALID] = "Bad file",
-            [SNAP_IO] = "Card error", [SNAP_LINK] = "FPGA timeout",
-            [SNAP_UNSUPPORTED] = "Unsupported", [SNAP_WRONG] = "Wrong game",
-            [SNAP_BUSY] = "Busy", [SNAP_HW] = "FPGA error"
-        };
-        result = rc == SNAP_OK ? (load ? "Restored" : "Saved") : errors[rc];
+        result = rc == SNAP_OK ? (load ? MSG_RESTORED : MSG_SAVED) : rc;
     }
     atomic_store(&elapsed_ms, ticks_elapsed_ms(xTaskGetTickCount(), atomic_load(&started_tick)));
-    atomic_store(&message, result);
-    atomic_store(&busy, false);
+    atomic_store(&operation, operation_state(slot_number, result));
     Snapshot_PrintDiagnostics();
     vTaskDelete(NULL);
 }
 void Snapshot_Start(bool load)
 {
-    if (!replies) { atomic_store(&message, "Busy"); return; }
-    if (atomic_exchange(&busy, true)) return;
+    (void)Snapshot_StartSlot(load, 1);
+}
+bool Snapshot_StartSlot(bool load, unsigned slot_number)
+{
+    if (slot_number < 1 || slot_number > SNAP_SLOT_COUNT) return false;
+    unsigned request = operation_state(slot_number, load ? MSG_LOADING : MSG_SAVING);
+    unsigned previous = atomic_load(&operation);
+    if (operation_busy(previous) || !atomic_compare_exchange_strong(&operation, &previous, request))
+        return false;
+    if (!replies) {
+        atomic_store(&operation, operation_state(slot_number, SNAP_BUSY));
+        return false;
+    }
     TickType_t now = xTaskGetTickCount();
     atomic_store(&started_tick, now);
     atomic_store(&phase_started_tick, now);
@@ -436,11 +509,11 @@ void Snapshot_Start(bool load)
     atomic_store(&phase, "mount");
     atomic_store(&transferred, 0);
     atomic_store(&fpga_result, 0);
-    atomic_store(&message, load ? "Loading..." : "Saving...");
-    if (xTaskCreate(worker, "snapshot", 4608, (void *)(uintptr_t)load, 4, NULL) != pdPASS) {
+    if (xTaskCreate(worker, "snapshot", 4608, (void *)(uintptr_t)request, 4, NULL) != pdPASS) {
         finish_phase(xTaskGetTickCount());
         atomic_store(&elapsed_ms, ticks_elapsed_ms(xTaskGetTickCount(), now));
-        atomic_store(&message, "Busy");
-        atomic_store(&busy, false);
+        atomic_store(&operation, operation_state(slot_number, SNAP_BUSY));
+        return false;
     }
+    return true;
 }

@@ -107,13 +107,22 @@ static int report_audio(int argc, char **argv)
 
 static int report_snapshot(int argc, char **argv)
 {
-    if (argc == 2 && !strcmp(argv[1], "save")) Snapshot_Start(false);
-    else if (argc != 1) {
-        printf("Usage: snapshot [save]\n");
-        return 1;
+    if (argc == 1) {
+        Snapshot_PrintDiagnostics();
+        return 0;
     }
-    Snapshot_PrintDiagnostics();
-    return 0;
+    if ((argc == 2 || argc == 3) && !strcmp(argv[1], "save")) {
+        unsigned slot_number = 1;
+        if (argc == 3 && (argv[2][0] < '1' || argv[2][0] >= '1' + SNAP_SLOT_COUNT || argv[2][1] != '\0'))
+            goto usage;
+        if (argc == 3) slot_number = (unsigned)(argv[2][0] - '0');
+        bool accepted = Snapshot_StartSlot(false, slot_number);
+        Snapshot_PrintDiagnostics();
+        return accepted ? 0 : 1;
+    }
+usage:
+    printf("Usage: snapshot [save [1|2|3]]\n");
+    return 1;
 }
 
 // Poll on the same bus as the PCM data. Older FPGA builds leave MISO
@@ -139,8 +148,10 @@ static void read_headphone_wheel(void)
 
 static bool snapshot_spi_transfer(bool read, uint8_t *packet, size_t bytes)
 {
+    // The display can own the bus for a whole 45-transaction refresh. Give
+    // it time to release the mutex even when audio or SD tasks preempt it.
     if (!packet || !bytes || bytes > 1026 || !spi_gate ||
-        !xSemaphoreTake(spi_gate, pdMS_TO_TICKS(20))) return false;
+        !xSemaphoreTake(spi_gate, pdMS_TO_TICKS(250))) return false;
     // Let the FPGA observe idle chip select after a cancelled block or
     // a preceding display/audio transaction on the shared bus.
     esp_rom_delay_us(1);

@@ -164,6 +164,7 @@ static OSD_Result_t MenuMgr_OnButton(const Button_t Button, const ButtonState_t 
     switch (Button)
     {
         // Fall-through
+        case kButton_Start:
         case kButton_B:
         case kButton_A:
         case kButton_Down:

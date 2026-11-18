@@ -60,10 +60,15 @@ with tempfile.TemporaryDirectory() as temp:
             run(vvp + ["model"], temp)
     bulk_sources = [rtl / "EMU/snapshot_control.v", rtl / "BSP/snapshot_block_transfer.v",
                     rtl / "BSP/snapshot_spi_buffer.v", rtl / "BSP/qspi_slave.v"]
-    for code in (0, 3):
+    for code in (0, 2, 3):
         run(ivl + [f"-Psnapshot_bulk_tb.RAM_CODE={code}", "-s", "snapshot_bulk_tb",
                    "-o", "bulk", tests / "snapshot_bulk_tb.sv", *bulk_sources], temp, True)
         run(vvp + ["bulk"], temp)
+    # snapshot_bulk_tb.sv also supplies the portable dual-port memory model.
+    run(ivl + ["-s", "osd_snapshot_isolation_tb", "-o", "osd_rows",
+               tests / "osd_snapshot_isolation_tb.sv", tests / "snapshot_bulk_tb.sv",
+               rtl / "BSP/qspi_slave.v", rtl / "BSP/mm_burst_write.v"], temp, True)
+    run(vvp + ["osd_rows"], temp)
     for ram_code, rom_bits in ((3, 5), (2, 7), (0, 2), (0, 4), (0, 6), (0, 7)):
         run(ivl + [f"-Psnapshot_mbc1_tb.RAM_CODE={ram_code}",
                    f"-Psnapshot_mbc1_tb.ROM_BITS={rom_bits}",

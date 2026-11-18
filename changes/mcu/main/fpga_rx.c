@@ -203,12 +203,10 @@ static bool ProcessByte(uint8_t NextByte, RxMsg_t *pMsg)
                 if (NextByte == kSysMgmtConsts_HeaderV2Marker)
                 {
                     _eState = kWaitForV2Addr;
-                    FPGA_SetProtoV1(false);
                 }
                 else
                 {
                     _eState = kWaitForFullV1Msg;
-                    FPGA_SetProtoV1(true);
                 }
             }
             break;
@@ -216,9 +214,8 @@ static bool ProcessByte(uint8_t NextByte, RxMsg_t *pMsg)
         case kWaitForFullV1Msg:
             if (NextByte == kSysMgmtConsts_HeaderV1Marker)
             {
-                // We did not receive a complete message. Start over.
-                _eState = kScanForHeaderMarker;
-                BufferIndex = 0;
+                // This marker is also the beginning of the replacement frame.
+                BufferIndex = 1;
                 break;
             }
 
@@ -245,7 +242,7 @@ static bool ProcessByte(uint8_t NextByte, RxMsg_t *pMsg)
             }
             DecodeBuffer[BufferIndex++] = NextByte;
             MsgLen = NextByte;
-            _eState = kWaitForV2Payload;
+            _eState = MsgLen ? kWaitForV2Payload : kWaitForV2CRC;
             break;
         case kWaitForV2Payload:
             DecodeBuffer[BufferIndex++] = NextByte;
@@ -279,12 +276,13 @@ static bool ProcessByte(uint8_t NextByte, RxMsg_t *pMsg)
 
 static void ProcessMessage(const RxMsg_t *const pMsg)
 {
-    if (pMsg == NULL)
+    if (pMsg == NULL || !pMsg->Len)
     {
         return;
     }
 
     // Valid message reconstructed, process the message
+    FPGA_SetProtoV1(pMsg->Header == kSysMgmtConsts_HeaderV1Marker);
     float result;
     uint16_t rxdata;
     if (pMsg->Header == kSysMgmtConsts_HeaderV1Marker)

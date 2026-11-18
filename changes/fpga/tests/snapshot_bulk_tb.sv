@@ -3,7 +3,7 @@ module snapshot_bulk_tb #(parameter RAM_CODE = 0);
 `ifdef GOWIN_PRIMITIVES
     GSR GSR(.GSRI(1'b1));
 `endif
-    localparam WORDS = RAM_CODE == 3 ? 10341 : 6309;
+    localparam WORDS = RAM_CODE == 3 ? 10341 : RAM_CODE == 2 ? 7269 : 6309;
     reg clk = 0;
     always #30 clk = ~clk;
     reg reset = 1, supported = 1, command_toggle = 0;

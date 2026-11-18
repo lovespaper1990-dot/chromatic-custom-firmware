@@ -183,6 +183,7 @@ module mem_system_top #(parameter ISSIMU=0)
     mm_burst_write u_mm_burst_write(
         .QSPI_CLK(QSPI_CLK),
         .QSPI_CS(QSPI_CS),
+        .reset(reset),
         .qAddress(qAddress),
         .qDataValid(qDataValid),
         .qOsdWrite(qOsdWrite),
@@ -191,6 +192,7 @@ module mem_system_top #(parameter ISSIMU=0)
         .xClk(xClk),
         // Standard FIFO uses xRegWrite here (not FWFT FIFO)
         .xRdEn(RAMOut_writeNext[RAMPORT_QSPI]),
+        .xDone(RAMOut_done[RAMPORT_QSPI]),
         .xRamReady(BIST_finished),
         .xMcuReqWrite(RAMIn_request[RAMPORT_QSPI]),
         .xDout(RAMIn_din[RAMPORT_QSPI]),

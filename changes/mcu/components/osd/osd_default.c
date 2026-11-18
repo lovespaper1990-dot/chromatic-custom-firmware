@@ -151,7 +151,7 @@ static void CreateMenuStatus(lv_obj_t *const pScreen)
     if (Tab_AddItem(pList, &Headphones, pScreen) != kOSD_Result_Ok)
         ESP_LOGE(TAG, "Bluetooth tab item init failed");
 
-    static TabItem_t Snapshot = {.Widget = {
+    static TabItem_t Snapshot = {.UsesStart = true, .Widget = {
         .Name = "SNAPSHOT", .fnDraw = SnapshotMenu_Draw,
         .fnOnTransition = SnapshotMenu_Leave, .fnOnButton = SnapshotMenu_Button
     }};

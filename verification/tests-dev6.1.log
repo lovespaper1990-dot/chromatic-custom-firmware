@@ -1,0 +1,85 @@
+4.6-dev6.1-test offline verification
+verification/run.sh exited 0
+
+PASS three independent per-game slots, legacy slot 1, invalid and empty requests, interrupted overwrite, isolated fallback, full ID collision.
+Snapshot persistence: round trip, interrupted writes, abrupt process exit, torn trailers, post-close readback failure, corrupt core header/data/identity fallback, foreign save preservation, legacy format and missing cart timing rejection passed.
+PASS Bluetooth PCM wheel range, stereo polarity, startup mute, full scale and unaligned buffers
+PASS zero-length UART frames, bad CRC recovery, full snapshot reply, repeated V1 header
+PASS snapshot menu input, confirmation and busy states; max English [45, 44], Chinese [37, 49] px
+PASS control timeout recovery: a lost status reply is retried once, capture and restore commands are never replayed
+PASS production SPI cache: independent wire CRC16 for lengths 0..1024, one-shot/persistent CRC faults, 3 geometries, ordered commit, no fallback after partial failure, explicit legacy capability, 32-bit tick wrap
+PASS production save/load ordering: cartridge changed or missing after capture/at restore, unmount failure, file and capture errors
+PASS slot dispatch: competing starts accept one immutable target, worker results bound to slot, default slot 1, valid/invalid console requests, SD/task errors
+PASS USB audio packet storage: 1128 full, 518 short, 1670 underrun, 1637 overlapping reads
+PASS physical MBC5 bus model: 32 KiB, four RAM banks, read/write sequencing and removal
+PASS MBC5 snapshot: four SRAM banks, 9-bit ROM/disabled RAM state, capture immutability, delayed ACK/abort recovery and no-RAM restore
+PASS     MBC5 262144-byte full ROM CRC, exact bus timing, bank restoration, reset/ejection and unsupported header
+PASS: shared snapshot RAM matches independent ports over 329193 cycles
+PASS diagnostics default-off: timeout and nonzero flags return fff2/zero
+PASS: 6309 capture/read/upload/restore words, partial upload and wrong mapper
+PASS diagnostics default-off: timeout and nonzero flags return fff2/zero
+PASS: 7269 capture/read/upload/restore words, partial upload and wrong mapper
+PASS diagnostics default-off: timeout and nonzero flags return fff2/zero
+PASS: 10341 capture/read/upload/restore words, partial upload and wrong mapper
+PASS standby flush during a stalled QSPI read
+PASS stereo samples, burst framing, partial-read retry, underflow, OSD isolation and MISO release
+PASS: Bluetooth wheel packets, UART arbitration, CRC/length, control, bulk command and word byte order
+PASS: SPI bulk 6309 words each way, partial final block, CRC/truncation/replay/ejection protection, full restore gate
+PASS: SPI bulk 7269 words each way, partial final block, CRC/truncation/replay/ejection protection, full restore gate
+PASS: SPI bulk 10341 words each way, partial final block, CRC/truncation/replay/ejection protection, full restore gate
+PASS: real OSD QSPI, snapshot address isolation, two delayed rows, overflow/truncation/reset recovery and all 45 normal rows
+PASS MBC1 snapshot: ROM address bits=5 RAM=32768, raw low5/high2/mode/enable, both ROM windows, full SRAM, disabled RAM, delayed ACK/abort/no-RAM recovery
+PASS MBC1 snapshot: ROM address bits=7 RAM=8192, raw low5/high2/mode/enable, both ROM windows, full SRAM, disabled RAM, delayed ACK/abort/no-RAM recovery
+PASS MBC1 snapshot: ROM address bits=2 RAM=0, raw low5/high2/mode/enable, both ROM windows, full SRAM, disabled RAM, delayed ACK/abort/no-RAM recovery
+PASS MBC1 snapshot: ROM address bits=4 RAM=0, raw low5/high2/mode/enable, both ROM windows, full SRAM, disabled RAM, delayed ACK/abort/no-RAM recovery
+PASS MBC1 snapshot: ROM address bits=6 RAM=0, raw low5/high2/mode/enable, both ROM windows, full SRAM, disabled RAM, delayed ACK/abort/no-RAM recovery
+PASS MBC1 snapshot: ROM address bits=7 RAM=0, raw low5/high2/mode/enable, both ROM windows, full SRAM, disabled RAM, delayed ACK/abort/no-RAM recovery
+PASS MBC1 ROM=0 RAM=0 mapper=1 MBC1M=0 alias=0: zlib CRC, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=1 RAM=0 mapper=1 MBC1M=0 alias=0: zlib CRC, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=3 RAM=0 mapper=2 MBC1M=0 alias=0: zlib CRC, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=4 RAM=3 mapper=3 MBC1M=0 alias=0: zlib CRC, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=5 RAM=2 mapper=3 MBC1M=0 alias=0: zlib CRC, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=6 RAM=2 mapper=3 MBC1M=0 alias=0: zlib CRC, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=5 RAM=2 mapper=3 MBC1M=1 alias=0: zlib CRC, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS MBC1 ROM=5 RAM=2 mapper=3 MBC1M=0 alias=1: zlib CRC, raw-zero translation, $20/$40/$60 windows, exact bus timing, safe rejection/hotplug
+PASS ROM-only 32768-byte full ROM CRC, exact bus timing, bank restoration, reset/ejection and unsupported header
+PASS 10 narrow asynchronous pulses, 3 real hotplug pulses, two full ROM CRC identities, synchronous BIST gating
+PASS ESP32/SD shared strap: startup high, 255-tick release, DAT0 low without contention, DTR download priority and RTS restart
+PASS: six concurrent PSRAM clients, grants, data beats and completion routing
+PASS: 6309 words, 64 registers and five memory regions; delayed ACK, invalid header and abort recovery
+PASS: 7269 words, 64 registers and five memory regions; delayed ACK, invalid header and abort recovery
+PASS: 10341 words, 64 registers and five memory regions; delayed ACK, invalid header and abort recovery
+PASS: joint real state engine + MBC5 + mailbox, 8192-byte physical RAM, all core memories and mapper before first CPU enable, safe capture abort (20784 backing requests, manager=0)
+PASS: joint real state engine + MBC5 + mailbox, 32768-byte physical RAM, all core memories and mapper before first CPU enable, safe capture abort (26928 backing requests, manager=0)
+PASS: joint real state engine + MBC5 + mailbox, 8192-byte physical RAM, all core memories and mapper before first CPU enable, safe capture abort (20784 backing requests, manager=1)
+PASS: joint real state engine + MBC5 + mailbox, 32768-byte physical RAM, all core memories and mapper before first CPU enable, safe capture abort (26928 backing requests, manager=1)
+PASS: joint real state engine + MBC1 + mailbox, 8192-byte physical RAM, all core memories and mapper before first CPU enable, safe capture abort (20784 backing requests, manager=0)
+PASS: joint real state engine + MBC1 + mailbox, 32768-byte physical RAM, all core memories and mapper before first CPU enable, safe capture abort (26928 backing requests, manager=0)
+PASS: joint real state engine + MBC1 + mailbox, 8192-byte physical RAM, all core memories and mapper before first CPU enable, safe capture abort (20784 backing requests, manager=1)
+PASS: joint real state engine + MBC1 + mailbox, 32768-byte physical RAM, all core memories and mapper before first CPU enable, safe capture abort (26928 backing requests, manager=1)
+PASS MENU short/long/chord, sleep at 150 ticks, held-key consumption, snapshot and cartridge arbitration, retained CPU enables, LCD/PCM/USB and switch reset
+PASS speed=1: 220 standby/wake (147 requests during bus activity), 118931 half-pclk pin/state checks, 67320 retained checks; ungated cart diverged 72389 times
+PASS speed=0: 220 standby/wake (166 requests during bus activity), 126771 half-pclk pin/state checks, 67320 retained checks; ungated cart diverged 76857 times
+PASS cart snapshot speed=0: 32 cross-phase restores and 4096 half-clock physical bus/state checks
+PASS cart snapshot speed=1: 32 cross-phase restores and 4096 half-clock physical bus/state checks
+PASS palette readback: 32768 full-width comparisons with legacy OR, all addresses 0..1023, zero/ones/byte-order/random live states
+PASS: palette capture, UART atomicity, 16-row restore before first guest enable, partial abort and cold reset
+PASS: external OAM/GDMA drained, internal OAM/GDMA retained, external H-Blank resumed
+PASS real GBse counter/marker program through 64 standby/wake cycles at both speeds, 64 CPU state readback addresses per trial
+PASS real GBse/cart snapshot speed=1: 32 restores, 8192 exact enable traces, request phases=00ff Tstates=11110, 5308 instruction reads
+PASS real GBse/cart snapshot speed=0: 32 restores, 8192 exact enable traces, request phases=ffff Tstates=11110, 5246 instruction reads
+PASS real CPU -> manager -> state engine capture speed=1: four phases=0055, 6309 requests each, frozen execution, last header and resumed counter
+PASS real CPU -> manager -> state engine capture speed=0: four phases=1111, 6309 requests each, frozen execution, last header and resumed counter
+PASS real GBse HALT/INT/STOP/cart speed=1: 16 restores, 3072 continuation steps, 1024 external DMA bytes, 32 STOP edges
+PASS real GBse HALT/INT/STOP/cart speed=0: 16 restores, 3072 continuation steps, 1024 external DMA bytes, 32 STOP edges
+PASS: mixed-language black-box elaboration of the board, game core and snapshot connections
+PASS: project VHDL elaboration for CPU, audio, clocks, state engine, PSRAM and UART
+
+ESP-IDF 5.3 target build succeeded. MCU 0.13.8-dev6.1-test, system 4.6-dev6.1-test, 15% app partition free.
+Programming images: evt1_x2.bin SHA256 bbd25e307e4d9967ab0409698b229b2ec18db31e697f17263eec1526f4ef7873; evt1_x2.fs contains the identical payload.
+MCU application SHA256 4ff442e06228614dac19399c741af0aaa5b5d062e1f703e8abcc013e0510dfe6.
+Gowin Map2, Place3, Route0, Maxfan100. PnR exit 0, all routes complete and 0 violated setup/hold endpoints, 58345 paths and 35467 endpoints analyzed.
+Margins ns: setup 0.750, hold 0.127, recovery 1.127, removal 0.056, minimum pulse width 1.958. CLS 11226/11520, BSRAM 56/56.
+Original and repaired display destination checked with a queued OSD row followed by snapshot SPI traffic. GW5A DPB primitive simulation passed row/truncation/reset tests.
+Target FatFs configuration on a 64 MiB file-backed FAT32 image: 2 games, 3 slots each, 2 generations per slot, 12 short-name files. All 6 newest loads survived closing and reopening from another process; a single bad CRC fell back only in its own slot.
+Sudden host exit during replacement left all previous playable slots intact in the separate image, with an FSInfo free-cluster count mismatch. Physical SD power loss and console timing remain unverified.
