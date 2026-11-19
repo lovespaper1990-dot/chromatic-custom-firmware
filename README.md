@@ -1,29 +1,65 @@
-# Chromatic 定制固件 4.6-dev6.2-test
+# ModRetro Chromatic 定制固件 4.6-dev6.2-test
 
-[dev6.2 卡带启动识别修正与真机进展](docs/4.6-dev6.2-test测试说明.md)。dev6.1 实机存读档约 1.2～1.5 秒，断电后出现识别码变化，dev6.2 已修正扫描并刷入，原配《俄罗斯方块》的新 3 号槽已通过完整断电恢复。
+**本项目是非官方个人分享的开源固件，当前为公开测试版。**
 
-每款受支持的游戏有 3 个可选即时存档位。插卡开机后自动识别游戏，在「主页 → 即时存档」按 START 切换 1、2、3 号，按 A 保存，按 B 两次读档。已有的快照直接用 1 号位读取。[三槽操作与离线验证](docs/4.6-dev6.1-test测试说明.md)
+适用于配备 ESP32、机内 microSD 卡座及 GW5A-25 FPGA 的 ModRetro Chromatic，提供简体中文菜单、蓝牙耳机、临时待机和每款游戏三个即时存档槽。
 
-本项目适用于配备 ESP32 和机内 microSD 卡座的 ModRetro Chromatic。dev6.2 是非官方测试固件，沿用标准 MBC1 适配和高速 SPI。dev5.5 的原配《俄罗斯方块》已通过真机保存、读档与断电恢复，《塞尔达》有可用反馈。dev6.2 的《俄罗斯方块》实测保存约 1 秒、读档约 1.3～1.5 秒。《马里奥大陆》和《星之海洋》的实卡表现仍待测。[dev6 卡带范围和传输说明](docs/4.6-dev6-test测试说明.md)
+原配《俄罗斯方块》已经通过实机保存、读档和完整断电后恢复。dev6.2 实测保存约 0.99～1.12 秒，读档约 1.45～1.46 秒。测试范围及尚未解决的问题见下文。[dev6.2 实机记录](docs/4.6-dev6.2-test测试说明.md)
 
-[dev5.5 修正与测试记录](docs/4.6-dev5.5测试说明.md) · [SD 识别修正](docs/4.6-dev5.2测试说明.md) · [dev5 测试说明](docs/4.6-dev5-test测试说明.md) · [即时存档研究与实现](docs/即时存档研究与实现.md) · [dev4 真机验证记录](docs/4.6-dev4-test测试说明.md)
+**刷机前请阅读测试免责，备份游戏进度及 microSD 上的整个 `SNAP` 文件夹。刷写失败、供电中断或兼容性问题可能造成开机异常、进度丢失、存档损坏，并可能需要额外恢复操作。** 固件按 GNU GPLv3 的现状条款提供，使用者需自行决定是否刷入。[免责声明](docs/免责声明.md) · [完整许可](LICENSE)
 
-此前发布的 [4.6-dev2 固件包](https://github.com/lovespaper1990-dot/chromatic-custom-firmware/releases/download/v4.6-dev2/Chromatic-4.6-dev2.zip)仍可下载；它不包含本轮 MBC5 改动。[首次安装说明](docs/安装与使用.md) · [dev2 文件校验值](SHA256SUMS)
+## 下载与安装
 
-| 功能 | 操作 |
+从 Releases 下载 `Chromatic-4.6-dev6.2-test-install.zip` 并完整解压。在包根目录双击对应入口，按提示准备依赖、核对设备并确认刷写。
+
+| 电脑 | 入口 | 首次使用 |
+| --- | --- | --- |
+| Mac | `一键刷机-Mac.command` | 需要 Python 3.9 或更新版及 Homebrew。脚本可在确认后准备刷写工具和本地 Python 依赖。 |
+| Windows x64 | `一键刷机-Windows.cmd` | 脚本可在确认后通过 winget、MSYS2 准备工具。首次 USB 驱动安装可能需要官方更新器。 |
+
+Mac 与 Windows 入口共用包校验、设备检查和刷写流程。Windows 原生环境尚未实测，已做模拟流程与静态检查。源码 ZIP 不含配套固件镜像，安装时请使用 Releases 中的完整发行包。[下载页面](https://github.com/lovespaper1990-dot/chromatic-custom-firmware/releases/tag/v4.6-dev6.2-test) · [安装与使用](docs/安装与使用.md) · [给 AI 的安装说明](docs/给AI的安装说明.md)
+
+本次公开的固件对应已上机验证的 dev6.2。后续时序优化候选仍处于离线验证阶段，其结果另行记录。
+
+## 功能与操作
+
+| 功能 | 操作与范围 |
 | --- | --- |
-| 临时待机 | 保持电源开关在 ON，在游戏画面单独长按 MENU 约 1.5 秒，背光熄灭后松手。再短按并松开 MENU，游戏从原处继续。待机不需要 microSD，关机、断电或拔卡会丢失现场。 |
-| 简体中文 | 在 System → Language 按 A 切换语言。 |
-| 蓝牙耳机 | 耳机进入配对模式后打开主页的“蓝牙”，按 A 扫描，按 B 选择设备，再按 A 连接。 |
-| microSD 即时存档 | 使用 FAT32 microSD，每款游戏 3 个槽，每槽轮换两代以保护上一次有效的快照。支持指定的 ROM-only、标准 MBC1 和 MBC5 配置。 |
+| 每游戏三个即时存档槽 | 插卡开机后自动识别游戏。在「主页 → 即时存档」按 START 循环选择 1、2、3 号槽，按 A 保存，按 B 再按 B 确认读档。确认读档时按 A 取消。 |
+| 存档备份代际 | 每槽轮换保留两代。读取该槽最新有效的一份，最新一代损坏时可回退到上一代。备份时复制整个 `SNAP` 文件夹。 |
+| 简体中文 | 在 `System → Language` 按 A 切换语言。 |
+| 蓝牙耳机 | 在主页「蓝牙」按 A 扫描、按 B 选择、按 A 连接。可记住耳机并尝试重连，机身滚轮用于调整蓝牙音量。 |
+| 临时待机 | 电源开关保持 ON。在游戏画面单独长按 MENU 约 1.5 秒，背光熄灭后松手。短按并松开 MENU 唤醒，游戏从原处继续。 |
 
-原配《俄罗斯方块》、《塞尔达传说 大地之章》和 GB/GBC 版《星之海洋 蔚蓝星球》是本轮目标卡带；《俄罗斯方块》已通过基础验收，《塞尔达》有可用反馈，《星之海洋》仍待复测，实际范围需读取卡头确认。读档会一起回退卡带 RAM 中的游戏自带存档。请保留重要进度备份。当前只做单机快照，联机现场恢复不在支持范围。
+即时存档使用有空余空间的 FAT32 microSD。等待「已存档」或「已读档」再关机、拔卡或离开。临时待机依靠持续供电保留现场，仍会耗电，关机、断电或拔卡会丢失待机现场。
+
+读档会回退 CPU、内部内存和卡带 RAM 中的游戏进度。恢复卡带 RAM 的最后阶段若断电或拔卡，原生游戏存档可能只更新一部分。请先用可重新开始的进度测试。
+
+## 实测结果与已知问题
+
+| 项目 | 当前状态 |
+| --- | --- |
+| 原配《俄罗斯方块》 | dev6.2 已验证高速保存、读档及完整断电后的 3 号槽恢复。旧识别码下的 1、2 号槽已经复制恢复，机主确认旧 2 号位置正确。 |
+| 《塞尔达》新版 GBC 单卡 | dev5.5 有可用反馈，dev6.2 尚待逐卡复测。 |
+| 正版《马里奥大陆》 | 先前可运行。dev6.2 的标准 MBC1 无卡带 RAM 快照模型已通过离线验证，实体卡即时存档尚待验证。 |
+| 《星之海洋》新版 GBC 单卡 | 先前自定义固件曾出现黑屏，dev6.2 尚待实卡复测。 |
+| 蓝牙声音与滚轮 | dev4 已由机主确认同一次连接中可以调大、调小音量。dev6.2 同时播放蓝牙和高速存读档的压力测试仍待完成。 |
+| 长期稳定性 | 当前 FPGA 构建通过时序检查，最差建立余量为 +0.002 ns，余量较窄。长时间运行、温度变化及更多设备仍需验证。 |
+| 早期存档兼容 | dev6.1 及更早开发版曾受初始 ROM 分页影响而得到不同识别码。dev6.2 修正扫描，旧档可能需要维护者确认同一实体卡后显式导入。 |
+
+当前即时存档开放 32 KiB ROM-only、指定标准 MBC1 和 MBC5 配置。MBC1 支持类型 01/02/03、最高 2 MiB ROM、无 RAM 或 8 KiB RAM，32 KiB RAM 仅开放至 512 KiB ROM。MBC5 最高开放 8 MiB ROM，类型 19 对应无 RAM，类型 1A/1B 对应 8 KiB 或 32 KiB RAM。MBC1M、MBC2、MBC3、RTC、2 KiB RAM及其他特殊卡带尚未开放，联机现场恢复也尚未支持。兼容性由卡头、分页行为和逐盘实测共同决定。[卡带支持范围](docs/4.6-dev6-test测试说明.md)
+
+报告问题时可提供电脑系统、菜单版本、卡带名称、问题发生步骤和界面提示。公开截图与日志前请去除序列号、蓝牙地址、个人目录和其他私人信息。
+
+## 更新官方固件与恢复
+
+游戏偶发卡死时，可先拨到 OFF、拔掉 USB、等待约 10 秒后再开机。需要回到官方固件时，使用官方 ModRetro Updater，并确认 MCU 与 FPGA 两部分都已完成官方固件写入。
+
+本固件的 FPGA 基础版本仍显示 18.14，更新器可能根据版本号跳过相同版本的 FPGA。出现「已经最新」、无法识别设备或只更新了一部分时，单次点击更新无法证明已完整恢复官方固件，需要按官方支持给出的恢复步骤处理。本项目尚未实测通过官方更新器从本版完整刷回官方固件。[官方更新器说明](https://support.modretro.com/en_us/chromatic-firmware-updater-ryhoYnzCx)
 
 ## 源码和构建
 
-本轮开发日期为 2026-11-18。[changes/fpga](changes/fpga) 和 [changes/mcu](changes/mcu) 包含新增或修改的源码、测试和配置。仓库通过 Git 子模块锁定 ModRetro FPGA v18.14、MCU v4.6 及上游指定的 Gameboy_MiSTer 核心。系统菜单版本为 4.6-dev6.2-test，ESP32 应用版本为 0.13.8-dev6.2-test。
-
-在新的目录中获取此版本的源码，然后把定制文件放入对应的上游目录。
+已上机验证的 dev6.2 固件源码基线为提交 `27c1b7c`。本仓库通过 Git 子模块锁定 ModRetro FPGA v18.14、MCU v4.6 及其对应 Gameboy_MiSTer 核心，定制文件位于 `changes/fpga` 和 `changes/mcu`。系统菜单版本为 `4.6-dev6.2-test`，ESP32 应用版本为 `0.13.8-dev6.2-test`。
 
 ```sh
 git clone --recurse-submodules https://github.com/lovespaper1990-dot/chromatic-custom-firmware.git
@@ -32,9 +68,8 @@ cp -Rp changes/fpga/. fpga/
 cp -Rp changes/mcu/. mcu/
 ```
 
-- FPGA 使用 Gowin FPGA Designer 标准版 1.9.12.04-1，目标器件为 GW5A-EV25UG256CC1/I0，版本 A。为这台开发机配置高云许可证，将 `gw_sh` 加入 PATH，或设置 `GOWIN_SH` 为其完整路径。从仓库根目录运行 `./fpga/esp32t/build_evt1_x2.sh`，输出在 `fpga/esp32t/build`。脚本在布线前运行综合接线检查；未知的层级或命名需要人工核对，不能跳过检查后直接声称验证通过。
-- MCU 使用 ESP-IDF 5.3.0 和 LVGL 8.4.0。激活 ESP-IDF 环境后运行 `(cd mcu && idf.py build)`。本次 ESP32 配置、分区选择及依赖锁定文件随源码提供。
-- 验证使用 C 编译器、Python 3、Icarus Verilog 13 和 GHDL 6。在仓库根目录运行 `./verification/run.sh`，设置 `SNAPSHOT_FULL_ROM=1` 可额外验证完整 8 MiB ROM 扫描。测试覆盖三个槽的隔离、菜单刷新与快照同时访问内存，以及 CPU 捕获和恢复。历史 dev5 [回归记录](verification/tests-dev5.log)、[完整 ROM 与执行负对照](verification/full-rom-dev5.txt)；历史 dev2 另见 [记录](verification/results.txt)及[时序报告](verification/evt1_x2.tr)。
-- 测试卡汇编源码及 RGBDS 重建命令见 [diagnostics/snapshot-test.asm](diagnostics/snapshot-test.asm)。
+FPGA 使用 Gowin FPGA Designer 标准版 1.9.12.04-1，器件为 GW5A-EV25UG256CC1/I0，版本 A。配置本机许可证后运行 `./fpga/esp32t/build_evt1_x2.sh`。MCU 使用 ESP-IDF 5.3.0 和 LVGL 8.4.0，激活环境后运行 `(cd mcu && idf.py build)`。本仓库提供对应配置及依赖锁定文件。
 
-本项目沿用 ModRetro 固件仓库的 GNU GPLv3，中文菜单字体遵循 SIL Open Font License 1.1。上游源码中的版权和第三方许可声明继续适用。[GPLv3](LICENSE) · [字体许可](changes/mcu/components/fonts/OSD-CJK-LICENSE.txt)
+验证需要 C 编译器、Python 3、Icarus Verilog 13 和 GHDL 6，运行 `./verification/run.sh`。设置 `SNAPSHOT_FULL_ROM=1` 可额外检查完整 8 MiB ROM 扫描。发布前同时检查综合接线、布线时序、镜像校验值和实机结果。[dev6.2 回归记录](verification/tests-dev6.2.log) · [dev6.2 时序报告](verification/evt1_x2-dev6.2-spi.tr)
+
+本项目沿用 ModRetro 固件仓库的 GNU GPLv3，中文点阵字体遵循 SIL Open Font License 1.1。上游版权和第三方许可声明继续适用。[GPLv3](LICENSE) · [字体许可](changes/mcu/components/fonts/OSD-CJK-LICENSE.txt)

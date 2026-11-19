@@ -4,3 +4,7 @@
 *.key
 *.pem
 *.sav
+.installer-venv/
+.flash-logs/
+__pycache__/
+*.pyc
