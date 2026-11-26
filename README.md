@@ -1,4 +1,10 @@
-# ModRetro Chromatic 定制固件 4.6-dev6.2-test
+# ModRetro Chromatic 定制固件
+
+**v4.6-d7S1 开发测试版**支持从 microSD 启动 GB/GBC，加入第一阶段 SD 即时存档。已在一台真机验证 SD 启动和单次 GB 保存。机主录像另展示 SD《坦克大战》关机重开后读档。三槽跨断电、GBC 快照与更多卡带仍待测试。选择前请看设备要求、备份和回退说明。
+
+[d7S1 下载与源码](https://github.com/lovespaper1990-dot/chromatic-custom-firmware/releases/tag/v4.6-d7S1) · [d7S1 测试说明](docs/4.6-d7S1-公开测试说明.md)
+
+## 既有 4.6-dev6.2-test 测试版
 
 **本项目是非官方个人分享的开源固件，当前为公开测试版。**
 
@@ -19,7 +25,7 @@
 
 Mac 与 Windows 入口共用包校验、设备检查和刷写流程。Windows 原生环境尚未实测，已做模拟流程与静态检查。源码 ZIP 不含配套固件镜像，安装时请使用 Releases 中的完整发行包。[下载页面](https://github.com/lovespaper1990-dot/chromatic-custom-firmware/releases/tag/v4.6-dev6.2-test) · [安装与使用](docs/安装与使用.md) · [给 AI 的安装说明](docs/给AI的安装说明.md)
 
-本次公开的固件对应已上机验证的 dev6.2。后续时序优化候选仍处于离线验证阶段，其结果另行记录。
+以下功能和实测数据对应 dev6.2。d7S1 的范围和安装方式见上方独立说明。
 
 ## 功能与操作
 
